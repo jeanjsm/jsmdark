@@ -22,6 +22,7 @@
 - Valide o comando FFmpeg gerado com a documentação oficial do FFmpeg e com os testes existentes no repositório.
 
 ## Boas práticas gerais
+- Tente sempre implementar o S.O.L.I.D. no projeto.
 - Sempre preserve comentários, marcações TODO e FIXMEs.
 - Não duplique funções.
 - Testes automatizados não devem ser removidos nem ignorados.

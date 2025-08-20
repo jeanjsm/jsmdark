@@ -20,6 +20,8 @@ def create_video_from_narration(
     preset: str = "medium",
     video_mode: str = "videos",
     image_segment_duration: float = 2.0,
+    overlay: str | None = None,
+    overlay_opacity: float = 1.0,
 ):
     narration = Path(narration_path)
     folder = Path(videos_folder)
@@ -119,6 +121,34 @@ def create_video_from_narration(
         ]
     else:
         raise ValueError(f"Modo de vídeo inválido: {video_mode}. Use 'videos' ou 'images'.")
+
+    if overlay:
+        overlay_path = str(overlay)
+        # Conta quantos -i existem (áudio + imagens/vídeos)
+        overlay_idx = sum(1 for x in inputs if x == "-i")
+        # Adiciona overlay como input, com loop infinito
+        inputs += ["-stream_loop", "-1", "-i", overlay_path]
+        # Aplica opacidade se necessário
+        overlay_filter = f"[{overlay_idx}:v]format=rgba,colorchannelmixer=aa={overlay_opacity}[ol];[vout][ol]overlay=shortest=1:format=auto[vfinal]"
+        filter_complex = f"{filter_complex};{overlay_filter}"
+        map_out = "[vfinal]"
+    else:
+        map_out = "[vout]"
+    cmd = [
+        FFMPEG_BIN,
+        *inputs,
+        "-filter_complex", filter_complex,
+        "-map", map_out,
+        "-map", "0:a:0",
+        "-c:v", "libx264",
+        "-preset", preset,
+        "-crf", str(crf),
+        "-r", str(fps),
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-shortest",
+        str(out)
+    ]
     run(cmd)
 
 
@@ -126,7 +156,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Gera vídeo a partir de narração e clipes ou imagens.")
     parser.add_argument("--narracao", required=True, help="Caminho para o arquivo de narração (áudio)")
-    parser.add_argument("--pasta_videos", required=True, help="Pasta com os vídeos ou imagens de entrada")
+    parser.add_argument("--pasta_videos", default='D:/videos background/pexels/result2/', help="Pasta com os vídeos ou imagens de entrada")
     parser.add_argument("--saida", default="output.mp4", help="Arquivo de saída (default: output.mp4)")
     parser.add_argument("--seed", type=int, default=None, help="Seed para sorteio dos vídeos/imagens")
     parser.add_argument("--fps", type=int, default=30, help="Frames por segundo do vídeo final")
@@ -136,6 +166,8 @@ if __name__ == "__main__":
     parser.add_argument("--preset", default="medium", help="Preset do x264 (ultrafast, fast, medium, slow, etc)")
     parser.add_argument("--video_mode", choices=["videos", "images"], default="videos", help="Modo de montagem: videos ou images")
     parser.add_argument("--image_segment_duration", type=float, default=2.0, help="Duração de cada imagem no vídeo (em segundos, só para modo images)")
+    parser.add_argument("--overlay", default=None, help="Arquivo de vídeo overlay (mp4)")
+    parser.add_argument("--overlay_opacity", type=float, default=0.3, help="Opacidade do overlay (0 a 1)")
     args = parser.parse_args()
 
     create_video_from_narration(
@@ -150,4 +182,6 @@ if __name__ == "__main__":
         preset=args.preset,
         video_mode=args.video_mode,
         image_segment_duration=args.image_segment_duration,
+        overlay=args.overlay,
+        overlay_opacity=args.overlay_opacity,
     )
