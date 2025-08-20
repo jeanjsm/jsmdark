@@ -48,6 +48,7 @@ def create_video_from_narration(
     subtitle_shadow_y: int = 2,
     words_per_subtitle: int = 1,
     vosk_model_path: str = "_internal/vosk_models/vosk-model-pt",
+    enable_ken_burns: bool = False,
 ):
     stages = [VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), SubtitleStage()]
     ctx = {
@@ -87,6 +88,7 @@ def create_video_from_narration(
         "subtitle_shadow_y": subtitle_shadow_y,
         "words_per_subtitle": words_per_subtitle,
         "vosk_model_path": vosk_model_path,
+        "enable_ken_burns": enable_ken_burns,
     }
     pipeline = MediaPipeline(stages)
     ctx = pipeline.run(ctx)
@@ -111,8 +113,8 @@ def create_video_from_narration(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gera vídeo a partir de narração e clipes ou imagens.")
     parser.add_argument("--narracao", default='./arquivos_teste/narracao.mp3', help="Caminho para o arquivo de narração (áudio)")
-    parser.add_argument("--pasta_videos", default='D:/videos background/pexels/result2/', help="Pasta com os vídeos ou imagens de entrada")
-    # parser.add_argument("--pasta_videos", default='./arquivos_teste/1/', help="Pasta com os vídeos ou imagens de entrada")
+    # parser.add_argument("--pasta_videos", default='D:/videos background/pexels/result2/', help="Pasta com os vídeos ou imagens de entrada")
+    parser.add_argument("--pasta_videos", default='./arquivos_teste/1/', help="Pasta com os vídeos ou imagens de entrada")
     parser.add_argument("--saida", default="output.mp4", help="Arquivo de saída (default: output.mp4)")
     parser.add_argument("--seed", type=int, default=None, help="Seed para sorteio dos vídeos/imagens")
     parser.add_argument("--fps", type=int, default=30, help="Frames por segundo do vídeo final")
@@ -145,7 +147,7 @@ if __name__ == "__main__":
     parser.add_argument("--enable_subtitles", action="store_true", help="Habilita a adição de legendas automáticas no vídeo")
     parser.add_argument("--subtitle_font_size", type=int, default=60, help="Tamanho da fonte das legendas")
     parser.add_argument("--subtitle_color", default="yellow", help="Cor das legendas (em formato hexadecimal ou nome da cor)")
-    parser.add_argument("--subtitle_position", default="bottom_center", choices=[
+    parser.add_argument("--subtitle_position", default="center", choices=[
         "top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right", "center"
     ], help="Posição das legendas na tela")
     parser.add_argument("--subtitle_font", default=None, help="Fonte das legendas (caminho do arquivo ou nome da fonte instalada)")
@@ -156,6 +158,7 @@ if __name__ == "__main__":
     parser.add_argument("--subtitle_shadow_color", default="black", help="Cor da sombra das legendas (em formato hexadecimal ou nome da cor)")
     parser.add_argument("--subtitle_shadow_x", type=int, default=2, help="Deslocamento da sombra das legendas no eixo X (em pixels)")
     parser.add_argument("--subtitle_shadow_y", type=int, default=2, help="Deslocamento da sombra das legendas no eixo Y (em pixels)")
+    parser.add_argument("--enable_ken_burns", action="store_true", help="Habilita o efeito Ken Burns (zoom e pan) nas imagens")
 
     args = parser.parse_args()
 
@@ -197,4 +200,5 @@ if __name__ == "__main__":
         subtitle_shadow_color=args.subtitle_shadow_color,
         subtitle_shadow_x=args.subtitle_shadow_x,
         subtitle_shadow_y=args.subtitle_shadow_y,
+        enable_ken_burns=args.enable_ken_burns,
     )

@@ -67,21 +67,36 @@ class VideoBaseStage(PipelineStage):
             if not images:
                 raise FileNotFoundError(f"Nenhuma imagem com extensões suportadas em: {folder}")
             segments = pick_image_segments_to_cover(audio_dur, images, image_segment_duration, seed=seed)
+            ken_burns_enabled = ctx.get("enable_ken_burns", False)
             for img, take in segments:
                 inputs += ["-loop", "1", "-t", f"{take:.3f}", "-i", str(img)]
             for idx, (_, take) in enumerate(segments, start=1):
                 label_in = f"{idx}:v"
                 take_str = f"{take:.3f}"
                 vout = f"v{idx}"
-                chain = (
-                    f"[{label_in}]"
-                    f"fps={fps},"
-                    f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease,"
-                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-                    f"setsar=1,"
-                    f"trim=0:{take_str},setpts=PTS-STARTPTS"
-                    f"[{vout}]"
-                )
+
+                if ken_burns_enabled:
+                    # Ken Burns effect with zoompan
+                    zoom_duration = int(take * fps)
+                    chain = (
+                        f"[{label_in}]"
+                        f"zoompan=z='min(zoom+0.0015,1.5)':d={zoom_duration}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',"
+                        f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease,"
+                        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+                        f"setsar=1,"
+                        f"trim=0:{take_str},setpts=PTS-STARTPTS"
+                        f"[{vout}]"
+                    )
+                else:
+                    chain = (
+                        f"[{label_in}]"
+                        f"fps={fps},"
+                        f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease,"
+                        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+                        f"setsar=1,"
+                        f"trim=0:{take_str},setpts=PTS-STARTPTS"
+                        f"[{vout}]"
+                    )
                 vf_parts.append(chain)
                 vlabels.append(f"[{vout}]")
             concat = "".join(vlabels) + f"concat=n={len(segments)}:v=1:a=0[vout]"
