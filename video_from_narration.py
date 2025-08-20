@@ -6,7 +6,7 @@ from typing import Callable, Dict, Any, List as TList
 from audio_utils import duration_seconds
 from video_utils import list_videos, pick_segments_to_cover, list_images, pick_image_segments_to_cover
 from ffmpeg_utils import run
-from pipeline import MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage, TransitionStage, SubtitleStage
+from pipeline import MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage, TransitionStage, SubtitleStage, CinematicStage
 import json
 import argparse
 
@@ -49,8 +49,14 @@ def create_video_from_narration(
     words_per_subtitle: int = 1,
     vosk_model_path: str = "_internal/vosk_models/vosk-model-pt",
     enable_ken_burns: bool = False,
+    cinematic_preset: str = None,
+    custom_lut_path: str = None,
+    enable_vignette: bool = False,
+    vignette_intensity: float = 1,
+    enable_curves: bool = False,
+    custom_curves: str = None,
 ):
-    stages = [VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), SubtitleStage()]
+    stages = [VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), CinematicStage(), SubtitleStage()]
     ctx = {
         "narration_path": narration_path,
         "videos_folder": videos_folder,
@@ -89,6 +95,12 @@ def create_video_from_narration(
         "words_per_subtitle": words_per_subtitle,
         "vosk_model_path": vosk_model_path,
         "enable_ken_burns": enable_ken_burns,
+        "cinematic_preset": cinematic_preset,
+        "custom_lut_path": custom_lut_path,
+        "enable_vignette": enable_vignette,
+        "vignette_intensity": vignette_intensity,
+        "enable_curves": enable_curves,
+        "custom_curves": custom_curves,
     }
     pipeline = MediaPipeline(stages)
     ctx = pipeline.run(ctx)
@@ -113,8 +125,8 @@ def create_video_from_narration(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gera vídeo a partir de narração e clipes ou imagens.")
     parser.add_argument("--narracao", default='./arquivos_teste/narracao.mp3', help="Caminho para o arquivo de narração (áudio)")
-    # parser.add_argument("--pasta_videos", default='D:/videos background/pexels/result2/', help="Pasta com os vídeos ou imagens de entrada")
     parser.add_argument("--pasta_videos", default='./arquivos_teste/1/', help="Pasta com os vídeos ou imagens de entrada")
+    # parser.add_argument("--pasta_videos", default='D:/videos background/pexels/result2/', help="Pasta com os vídeos ou imagens de entrada")
     parser.add_argument("--saida", default="output.mp4", help="Arquivo de saída (default: output.mp4)")
     parser.add_argument("--seed", type=int, default=None, help="Seed para sorteio dos vídeos/imagens")
     parser.add_argument("--fps", type=int, default=30, help="Frames por segundo do vídeo final")
@@ -160,6 +172,14 @@ if __name__ == "__main__":
     parser.add_argument("--subtitle_shadow_y", type=int, default=2, help="Deslocamento da sombra das legendas no eixo Y (em pixels)")
     parser.add_argument("--enable_ken_burns", action="store_true", help="Habilita o efeito Ken Burns (zoom e pan) nas imagens")
 
+    # Parâmetros cinematográficos
+    parser.add_argument("--cinematic_preset", choices=["warm", "cold", "vintage", "cinematic"], default=None, help="Preset de efeitos cinematográficos")
+    parser.add_argument("--custom_lut_path", default=None, help="Caminho para arquivo LUT customizado (.cube)")
+    parser.add_argument("--enable_vignette", action="store_true", help="Habilita efeito vignette")
+    parser.add_argument("--vignette_intensity", type=float, default=0.3, help="Intensidade do vignette (0.1 a 1.0)")
+    parser.add_argument("--enable_curves", action="store_true", help="Habilita ajuste de curves do preset")
+    parser.add_argument("--custom_curves", default=None, help="Curves customizadas (formato FFmpeg)")
+
     args = parser.parse_args()
 
     chroma_list = json.loads(args.chroma_list) if args.chroma_list else None
@@ -201,4 +221,10 @@ if __name__ == "__main__":
         subtitle_shadow_x=args.subtitle_shadow_x,
         subtitle_shadow_y=args.subtitle_shadow_y,
         enable_ken_burns=args.enable_ken_burns,
+        cinematic_preset=args.cinematic_preset,
+        custom_lut_path=args.custom_lut_path,
+        enable_vignette=args.enable_vignette,
+        vignette_intensity=args.vignette_intensity,
+        enable_curves=args.enable_curves,
+        custom_curves=args.custom_curves,
     )

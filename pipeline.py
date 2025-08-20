@@ -292,6 +292,92 @@ class TransitionStage(PipelineStage):
         ctx["map_out"] = f"[{prev_label}]"
         return ctx
 
+class CinematicStage(PipelineStage):
+    """Aplica efeitos cinematográficos como LUT, curves, vignette"""
+
+    CINEMATIC_PRESETS = {
+        "warm": {
+            "lut": "warm_lut",
+            "curves": "r=0.5/(1+(exp(10*(0.5-x)))):g=0.3/(1+(exp(10*(0.3-x)))):b=0.1/(1+(exp(10*(0.1-x))))",
+            "vignette": "PI/4+random(1)*PI/50':x0=W/2:y0=H/2"
+        },
+        "cold": {
+            "lut": "cold_lut",
+            "curves": "r=0.1/(1+(exp(10*(0.1-x)))):g=0.3/(1+(exp(10*(0.3-x)))):b=0.7/(1+(exp(10*(0.7-x))))",
+            "vignette": "PI/4+random(1)*PI/50':x0=W/2:y0=H/2"
+        },
+        "vintage": {
+            "lut": "vintage_lut",
+            "curves": "r=0.393*r+0.769*g+0.189*b:g=0.349*r+0.686*g+0.168*b:b=0.272*r+0.534*g+0.131*b",
+            "vignette": "PI/3+random(1)*PI/30':x0=W/2:y0=H/2"
+        },
+        "cinematic": {
+            "lut": "cinematic_lut",
+            "curves": "master=0.00392*val:shadows=0.5:midtones=1.0:highlights=0.8",
+            "vignette": "PI/5+random(1)*PI/40':x0=W/2:y0=H/2"
+        }
+    }
+
+    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        cinematic_preset = ctx.get("cinematic_preset")
+        custom_lut = ctx.get("custom_lut_path")
+        enable_vignette = ctx.get("enable_vignette", False)
+        vignette_intensity = ctx.get("vignette_intensity", 0.3)
+        enable_curves = ctx.get("enable_curves", False)
+        custom_curves = ctx.get("custom_curves")
+
+        if not any([cinematic_preset, custom_lut, enable_vignette, enable_curves]):
+            return ctx
+
+        filter_complex = ctx["filter_complex"]
+        map_out = ctx["map_out"]
+
+        cinematic_filters = []
+
+        # Aplicar LUT
+        if custom_lut and Path(custom_lut).exists():
+            cinematic_filters.append(f"lut3d='{custom_lut}'")
+        elif cinematic_preset and cinematic_preset in self.CINEMATIC_PRESETS:
+            preset = self.CINEMATIC_PRESETS[cinematic_preset]
+            if preset.get("lut") == "warm_lut":
+                cinematic_filters.append("colortemperature=temperature=3200")
+            elif preset.get("lut") == "cold_lut":
+                cinematic_filters.append("colortemperature=temperature=7000")
+            elif preset.get("lut") == "vintage_lut":
+                cinematic_filters.append("colorchannelmixer=rr=0.393:rg=0.769:rb=0.189:gr=0.349:gg=0.686:gb=0.168:br=0.272:bg=0.534:bb=0.131")
+            elif preset.get("lut") == "cinematic_lut":
+                cinematic_filters.append("eq=contrast=1.2:brightness=0.05:saturation=0.9")
+
+        # Aplicar curves
+        curves_filter = None
+        if custom_curves:
+            curves_filter = f"curves={custom_curves}"
+        elif cinematic_preset and cinematic_preset in self.CINEMATIC_PRESETS:
+            preset_curves = self.CINEMATIC_PRESETS[cinematic_preset].get("curves")
+            if preset_curves and enable_curves:
+                if "master=" in preset_curves:
+                    curves_filter = f"eq=gamma={preset_curves.split('master=')[1].split(':')[0]}"
+                else:
+                    curves_filter = f"curves={preset_curves}"
+
+        if curves_filter:
+            cinematic_filters.append(curves_filter)
+
+        # Aplicar vignette - funciona independente do preset
+        if enable_vignette:
+            angle_value = vignette_intensity * 3.14159 / 4
+            cinematic_filters.append(f"vignette=angle={angle_value}")
+
+        if cinematic_filters:
+            cinematic_chain = ",".join(cinematic_filters)
+            cinematic_out = "[vcinematic]"
+            cinematic_filter = f"{map_out}{cinematic_chain}{cinematic_out}"
+            filter_complex = f"{filter_complex};{cinematic_filter}"
+            ctx["filter_complex"] = filter_complex
+            ctx["map_out"] = cinematic_out
+
+        return ctx
+
 class SubtitleStage(PipelineStage):
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         if ctx.get("enable_subtitles"):
