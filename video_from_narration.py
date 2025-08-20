@@ -56,7 +56,7 @@ def create_video_from_narration(
     enable_curves: bool = False,
     custom_curves: str = None,
 ):
-    stages = [VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), CinematicStage(), SubtitleStage()]
+    stages = [VideoBaseStage(), TransitionStage(), OverlayStage(), CinematicStage(), LogoStage(), ChromaStage(), SubtitleStage()]
     ctx = {
         "narration_path": narration_path,
         "videos_folder": videos_folder,
@@ -135,7 +135,7 @@ if __name__ == "__main__":
     parser.add_argument("--crf", type=int, default=18, help="CRF do x264 (qualidade, menor é melhor)")
     parser.add_argument("--preset", default="medium", help="Preset do x264 (ultrafast, fast, medium, slow, etc)")
     parser.add_argument("--video_mode", choices=["videos", "images"], default="videos", help="Modo de montagem: videos ou images")
-    parser.add_argument("--image_segment_duration", type=float, default=23, help="Duração de cada imagem no vídeo (em segundos, só para modo images)")
+    parser.add_argument("--image_segment_duration", type=float, default=6, help="Duração de cada imagem no vídeo (em segundos, só para modo images)")
     parser.add_argument("--overlay", default=None, help="Arquivo de vídeo overlay (mp4)")
     parser.add_argument("--overlay_opacity", type=float, default=0.3, help="Opacidade do overlay (0 a 1)")
     parser.add_argument("--logo", default=None, help="Arquivo de imagem da logo (png)")

@@ -76,11 +76,25 @@ class VideoBaseStage(PipelineStage):
                 vout = f"v{idx}"
 
                 if ken_burns_enabled:
-                    # Ken Burns effect with zoompan
+                    # Ken Burns effect with zoompan - 5 posições aleatórias
                     zoom_duration = int(take * fps)
+
+                    # Define as 5 posições de zoom
+                    zoom_positions = {
+                        "center": ("iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),
+                        "top_right": ("iw-iw/zoom", "0"),
+                        "top_left": ("0", "0"),
+                        "bottom_right": ("iw-iw/zoom", "ih-ih/zoom"),
+                        "bottom_left": ("0", "ih-ih/zoom")
+                    }
+
+                    # Escolhe posição aleatória
+                    position = random.choice(list(zoom_positions.keys()))
+                    x_pos, y_pos = zoom_positions[position]
+
                     chain = (
                         f"[{label_in}]"
-                        f"zoompan=z='min(zoom+0.0015,1.5)':d={zoom_duration}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',"
+                        f"zoompan=z='min(zoom+0.0015,1.1)':d={zoom_duration}:x='{x_pos}':y='{y_pos}',"
                         f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease,"
                         f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
                         f"setsar=1,"
