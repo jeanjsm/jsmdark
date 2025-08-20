@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Dict, Any, List as TList
 from audio_utils import duration_seconds
 from video_utils import list_videos, pick_segments_to_cover, list_images, pick_image_segments_to_cover
+import random
 
 class PipelineStage(ABC):
     @abstractmethod
@@ -40,6 +41,8 @@ class VideoBaseStage(PipelineStage):
             if not vids:
                 raise FileNotFoundError(f"Nenhum vídeo com extensões suportadas em: {folder}")
             segments = pick_segments_to_cover(audio_dur, vids, seed=seed)
+            if len(segments) != len([v for v, _ in segments]):
+                raise ValueError(f"Número de segmentos ({len(segments)}) difere do número de vídeos selecionados ({len([v for v, _ in segments])})")
             for v, _ in segments:
                 inputs += ["-i", str(v)]
             for idx, (_, take) in enumerate(segments, start=1):
@@ -49,7 +52,7 @@ class VideoBaseStage(PipelineStage):
                 chain = (
                     f"[{label_in}]"
                     f"fps={fps},"
-                    f"scale=w=-2:h={height}:force_original_aspect_ratio=decrease,"
+                    f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease,"
                     f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
                     f"setsar=1,"
                     f"trim=0:{take_str},setpts=PTS-STARTPTS"
@@ -104,7 +107,7 @@ class OverlayStage(PipelineStage):
             overlay_path = str(overlay)
             overlay_idx = sum(1 for x in inputs if x == "-i")
             inputs += ["-stream_loop", "-1", "-i", overlay_path]
-            overlay_filter = f"[{overlay_idx}:v]format=rgba,colorchannelmixer=aa={overlay_opacity}[ol];[vout][ol]overlay=shortest=1:format=auto[vfinal]"
+            overlay_filter = f"[{overlay_idx}:v]format=rgba,colorchannelmixer=aa={overlay_opacity}[ol];{map_out}[ol]overlay=shortest=1:format=auto[vfinal]"
             filter_complex = f"{filter_complex};{overlay_filter}"
             map_out = "[vfinal]"
             ctx["inputs"] = inputs
@@ -193,6 +196,85 @@ class ChromaStage(PipelineStage):
             ctx["inputs"] = inputs
             ctx["filter_complex"] = filter_complex
             ctx["map_out"] = last_map
+        return ctx
+
+class TransitionStage(PipelineStage):
+    SUPPORTED_TRANSITIONS = [
+        "fade", "wipeleft", "wiperight", "wipeup", "wipedown",
+        "slideleft", "slideright", "slideup", "slidedown",
+        "circlecrop", "rectcrop", "distance", "fadeblack", "fadewhite",
+        "radial", "smoothleft", "smoothright", "smoothup", "smoothdown",
+        "circleopen", "circleclose", "vertopen", "vertclose",
+        "horzopen", "horzclose", "dissolve", "pixelize",
+        "diagtl", "diagtr", "diagbl", "diagbr", "hlslice", "hrslice",
+        "vuslice", "vdslice", "hblur", "fadegrays", "wipetl", "wipetr",
+        "wipebl", "wipebr", "squeezeh", "squeezev", "zoomin", "fadefast",
+        "fadeslow", "hlwind", "hrwind", "vuwind", "vdwind", "coverleft",
+        "coverright", "coverup", "coverdown", "revealleft", "revealright",
+        "revealup", "revealdown"
+    ]
+
+    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        transition_type = ctx.get("transition_type", "none")
+        if transition_type == "none":
+            return ctx
+
+        segments = ctx.get("segments", [])
+        if len(segments) < 2:
+            return ctx
+
+        existing_filter = ctx.get("filter_complex", "")
+        fps = ctx.get("fps", 30)
+
+        # 1) Normaliza CADA [vN] antes de entrar em qualquer xfade
+        #    Isso evita "current rate of 1/0" já no primeiro xfade.
+        prep_filters = []
+        clean_labels = []
+        for i in range(1, len(segments) + 1):
+            src = f"v{i}"
+            dst = f"vc{i}"           # "v-clean"
+            prep_filters.append(f"[{src}]settb=AVTB,fps={fps},format=yuv420p[{dst}]")
+            clean_labels.append(dst)
+
+        # 2) Encadeia as transições usando as labels normalizadas
+        transition_opts = [t for t in self.SUPPORTED_TRANSITIONS if t != "fade"]
+
+        prev_label = clean_labels[0]
+        prev_dur = segments[0][1]  # duração do primeiro take
+        transitions = []
+
+        for i in range(1, len(segments)):
+            if transition_type == "random":
+                ttype = random.choice(transition_opts)
+            else:
+                ttype = transition_type if transition_type in self.SUPPORTED_TRANSITIONS else "fade"
+
+            curr_label = clean_labels[i]
+            curr_dur = segments[i][1]
+
+            # offset relativo ao primeiro input do xfade atual
+            offset = max(prev_dur - 1, 0)
+
+            mid = f"t{i}"
+            out = f"trans{i}"
+            # xfade -> normaliza a SAÍDA para alimentar o próximo xfade
+            trans = (
+                f"[{prev_label}][{curr_label}]xfade=transition={ttype}:duration=1:offset={offset}[{mid}];"
+                f"[{mid}]settb=AVTB,fps={fps},format=yuv420p[{out}]"
+            )
+            transitions.append(trans)
+
+            prev_label = out
+            prev_dur = prev_dur + curr_dur - 1
+
+        # 3) Remove o concat original e injeta prep + transições
+        filter_parts = existing_filter.split(";")
+        filter_parts = [f for f in filter_parts if "concat=" not in f]
+        filter_parts.extend(prep_filters)
+        filter_parts.extend(transitions)
+
+        ctx["filter_complex"] = ";".join(filter_parts)
+        ctx["map_out"] = f"[{prev_label}]"
         return ctx
 
 class MediaPipeline:

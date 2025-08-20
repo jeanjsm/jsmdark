@@ -6,7 +6,7 @@ from typing import Callable, Dict, Any, List as TList
 from audio_utils import duration_seconds
 from video_utils import list_videos, pick_segments_to_cover, list_images, pick_image_segments_to_cover
 from ffmpeg_utils import run
-from pipeline import MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage
+from pipeline import MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage, TransitionStage
 import json
 import argparse
 
@@ -35,8 +35,9 @@ def create_video_from_narration(
     chroma_position: str = "bottom_right",
     chroma_start: float = 0.0,
     chroma_list: TList[Dict[str, Any]] | None = None,
+    transition_type: str = "none",
 ):
-    stages = [VideoBaseStage(), OverlayStage(), LogoStage(), ChromaStage()]
+    stages = [VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage()]
     ctx = {
         "narration_path": narration_path,
         "videos_folder": videos_folder,
@@ -61,6 +62,7 @@ def create_video_from_narration(
         "chroma_position": chroma_position,
         "chroma_start": chroma_start,
         "chroma_list": chroma_list,
+        "transition_type": transition_type,
     }
     pipeline = MediaPipeline(stages)
     ctx = pipeline.run(ctx)
@@ -112,6 +114,8 @@ if __name__ == "__main__":
     parser.add_argument("--chroma_start", type=float, default=4, help="Tempo de início do chroma (em segundos)")
     parser.add_argument('--chroma_list', type=str, default=None, help='Lista de chromas em JSON. Exemplo: \'[{"path": "./chroma1.mp4", "scale": 1, "position": "bottom_center", "start": 4}]\'')
 
+    parser.add_argument('--transition_type', default='none', choices=['none','fade', 'zoomin', 'smoothleft', 'smoothright', 'horzopen', 'random'], help='Tipo de transição entre vídeos')
+
     args = parser.parse_args()
 
     chroma_list = json.loads(args.chroma_list) if args.chroma_list else None
@@ -139,4 +143,5 @@ if __name__ == "__main__":
         chroma_position=args.chroma_position,
         chroma_start=args.chroma_start,
         chroma_list=chroma_list,
+        transition_type=args.transition_type,
     )
