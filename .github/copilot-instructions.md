@@ -1,5 +1,7 @@
 # Instruções para GitHub Copilot
 
+Always conform to the coding styles defined in styleguide.md in repo my-repo when generating code.
+
 ## Manutenção de código
 - **NÃO** apague funções, trechos de código nem comentários existentes, a menos que explicitamente solicitado via comentário TODO ou instrução clara.
 - Ao modificar funções existentes, mantenha a assinatura, tipo de retorno e documentação inalterados, a menos que solicitado.
