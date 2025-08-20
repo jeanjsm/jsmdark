@@ -277,6 +277,58 @@ class TransitionStage(PipelineStage):
         ctx["map_out"] = f"[{prev_label}]"
         return ctx
 
+class SubtitleStage(PipelineStage):
+    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        if ctx.get("enable_subtitles"):
+            from subtitle_utils import extract_audio_for_transcription, transcribe_audio, create_subtitle_filter
+            import tempfile
+            import os
+
+            narration_path = ctx["narration_path"]
+            subtitle_font_size = ctx.get("subtitle_font_size", 24)
+            subtitle_color = ctx.get("subtitle_color", "white")
+            subtitle_position = ctx.get("subtitle_position", "bottom_center")
+            subtitle_font = ctx.get("subtitle_font", None)
+            words_per_subtitle = ctx.get("words_per_subtitle", 1)
+            vosk_model_path = ctx.get("vosk_model_path", "_internal/vosk_models/vosk-model-pt")
+
+            filter_complex = ctx["filter_complex"]
+            map_out = ctx["map_out"]
+
+            # Extrai áudio temporário para transcrição
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio:
+                temp_audio_path = temp_audio.name
+
+            try:
+                extract_audio_for_transcription(narration_path, temp_audio_path)
+                segments = transcribe_audio(temp_audio_path, vosk_model_path)
+
+                if segments:
+                    subtitle_filter = create_subtitle_filter(
+                        segments,
+                        subtitle_font_size,
+                        subtitle_color,
+                        subtitle_position,
+                        words_per_subtitle,
+                        subtitle_font,
+                        ctx.get("subtitle_outline_color", "black"),
+                        ctx.get("subtitle_outline_width", 2),
+                        ctx.get("subtitle_shadow_color", "black"),
+                        ctx.get("subtitle_shadow_x", 2),
+                        ctx.get("subtitle_shadow_y", 2)
+                    )
+                    if subtitle_filter:
+                        # Aplica legendas como novo filtro no mapa atual
+                        filter_complex = f"{filter_complex};{map_out}{subtitle_filter}[vsubtitles]"
+                        ctx["map_out"] = "[vsubtitles]"
+
+            finally:
+                if os.path.exists(temp_audio_path):
+                    os.unlink(temp_audio_path)
+
+            ctx["filter_complex"] = filter_complex
+        return ctx
+
 class MediaPipeline:
     def __init__(self, stages: TList[PipelineStage]):
         self.stages = stages
