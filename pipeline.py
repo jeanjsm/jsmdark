@@ -5,7 +5,8 @@ from audio_utils import duration_seconds
 from video_utils import list_videos, pick_segments_to_cover, list_images, pick_image_segments_to_cover
 import random
 import hashlib
-from ffmpeg_utils import run
+import time
+from ffmpeg_utils import run, get_ffmpeg_path
 
 class PipelineStage(ABC):
     @abstractmethod
@@ -33,7 +34,7 @@ class VideoBaseStage(PipelineStage):
         if not folder.exists() or not folder.is_dir():
             raise FileNotFoundError(f"Pasta de entrada não encontrada ou inválida: {folder}")
         audio_dur = duration_seconds(narration)
-        FFMPEG_BIN = "ffmpeg"
+        ffmpeg_bin = get_ffmpeg_path()
         inputs = ["-y", "-hide_banner", "-loglevel", "error", "-i", str(narration)]
         vf_parts = []
         vlabels = []
@@ -492,9 +493,14 @@ class ImageCacheStage(PipelineStage):
     """Pré-renderiza imagens em vídeos curtos para cache"""
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        import time
+
         video_mode = ctx.get("video_mode")
         if video_mode != "images":
             return ctx
+
+        print("Iniciando pré-renderização de cache para imagens...")
+        start_time = time.time()
 
         # Configurações
         out_path = ctx["out_path"]
@@ -506,7 +512,9 @@ class ImageCacheStage(PipelineStage):
         fps = ctx["fps"]
         width = ctx["width"]
         height = ctx["height"]
-        enable_ken_burns = ctx.get("enable_ken_burns", False)
+
+        # Configurações de encoder do contexto
+        encoder_config = ctx.get("encoder_config", {})
 
         # Lista imagens disponíveis
         folder = Path(videos_folder)
@@ -516,19 +524,26 @@ class ImageCacheStage(PipelineStage):
 
         # Processa cada imagem única
         cached_videos = {}
+        processed_count = 0
+        total_images = len(images)
 
         for img_path in images:
             # Gera hash único baseado no caminho da imagem e configurações
-            img_config = f"{img_path}_{width}x{height}_{fps}fps_{image_segment_duration}s_{enable_ken_burns}"
+            img_config = f"{img_path}_{width}x{height}_{fps}fps_{image_segment_duration}s"
             img_hash = hashlib.md5(img_config.encode()).hexdigest()[:12]
             cached_video_path = cache_dir / f"img_{img_hash}.mp4"
 
             # Se já existe no cache, pula
             if cached_video_path.exists():
                 cached_videos[str(img_path)] = str(cached_video_path)
+                processed_count += 1
+                print(f"Cache encontrado ({processed_count}/{total_images}): {img_path.name}")
                 continue
 
             # Pré-renderiza a imagem
+            print(f"Pré-renderizando ({processed_count + 1}/{total_images}): {img_path.name}")
+            img_start = time.time()
+
             self._prerender_image(
                 img_path,
                 cached_video_path,
@@ -536,16 +551,23 @@ class ImageCacheStage(PipelineStage):
                 fps,
                 width,
                 height,
-                enable_ken_burns
+                encoder_config
             )
 
+            img_time = time.time() - img_start
+            print(f"Concluído em {img_time:.1f}s")
+
             cached_videos[str(img_path)] = str(cached_video_path)
+            processed_count += 1
+
+        total_time = time.time() - start_time
+        print(f"Cache finalizado em {total_time:.1f}s - {processed_count} imagens processadas")
 
         # Adiciona mapeamento ao contexto
         ctx["cached_images"] = cached_videos
         return ctx
 
-    def _prerender_image(self, img_path, output_path, duration, fps, width, height, ken_burns):
+    def _prerender_image(self, img_path, output_path, duration, fps, width, height, encoder_config):
         """Renderiza uma imagem em vídeo curto sem efeitos"""
 
         # Pré-renderização simples sem efeitos - apenas escala e padding
@@ -556,16 +578,175 @@ class ImageCacheStage(PipelineStage):
             f"setsar=1"
         )
 
+        # Comando base
         cmd = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            get_ffmpeg_path(), "-y", "-hide_banner", "-loglevel", "error",
             "-loop", "1", "-t", f"{duration:.3f}", "-i", str(img_path),
-            "-vf", video_filter,
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-            "-r", str(fps), "-an",
-            str(output_path)
+            "-vf", video_filter
         ]
 
+        # Adiciona configurações do encoder
+        codec = encoder_config.get("codec", "libx264")
+        cmd.extend(["-c:v", codec])
+
+        # Configurações específicas por codec
+        if "nvenc" in codec:
+            if "cq" in encoder_config:
+                cmd.extend(["-cq", encoder_config["cq"]])
+            if "preset" in encoder_config:
+                cmd.extend(["-preset", encoder_config["preset"]])
+            if "tune" in encoder_config:
+                cmd.extend(["-tune", encoder_config["tune"]])
+        else:
+            if "preset" in encoder_config:
+                cmd.extend(["-preset", encoder_config["preset"]])
+            if "crf" in encoder_config:
+                cmd.extend(["-crf", encoder_config["crf"]])
+
+        # Threads
+        if "threads" in encoder_config:
+            cmd.extend(["-threads", encoder_config["threads"]])
+
+        # Parâmetros finais
+        cmd.extend(["-r", str(fps), "-an", str(output_path)])
+
         run(cmd)
+
+class EncoderStage(PipelineStage):
+    """Configura encoder, resolução e parâmetros de qualidade"""
+
+    RESOLUTION_PRESETS = {
+        "horizontal_480p": (854, 480),
+        "horizontal_720p": (1280, 720),
+        "horizontal_1080p": (1920, 1080),
+        "horizontal_2k": (2560, 1440),
+        "vertical_480p": (480, 854),
+        "vertical_720p": (720, 1280),
+        "vertical_1080p": (1080, 1920),
+        "vertical_2k": (1440, 2560),
+    }
+
+    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        # Aplica preset de resolução
+        resolution_preset = ctx.get("resolution_preset", "horizontal_1080p")
+        if resolution_preset in self.RESOLUTION_PRESETS:
+            width, height = self.RESOLUTION_PRESETS[resolution_preset]
+            ctx["width"] = width
+            ctx["height"] = height
+
+        # Configura encoder
+        encoder = ctx.get("encoder", "libx264")
+        performance_profile = ctx.get("performance_profile", "quality")
+        threads = ctx.get("threads", 0)
+        gpu_quality = ctx.get("gpu_quality", 18)
+
+        # Configurações de encoder
+        encoder_config = self._get_encoder_config(encoder, performance_profile, threads, gpu_quality)
+        ctx["encoder_config"] = encoder_config
+
+        return ctx
+
+    def _get_encoder_config(self, encoder, performance_profile, threads, gpu_quality):
+        """Gera configuração do encoder baseada nos parâmetros"""
+        config = {}
+
+        # Configurações base por encoder
+        if encoder == "libx264":
+            config["codec"] = "libx264"
+            if performance_profile == "quality":
+                config["preset"] = "slow"
+                config["crf"] = "18"
+            else:  # speed
+                config["preset"] = "ultrafast"
+                config["crf"] = "23"
+
+        elif encoder == "libx265":
+            config["codec"] = "libx265"
+            if performance_profile == "quality":
+                config["preset"] = "medium"
+                config["crf"] = "20"
+            else:  # speed
+                config["preset"] = "ultrafast"
+                config["crf"] = "25"
+
+        elif encoder == "h264_nvenc":
+            config["codec"] = "h264_nvenc"
+            config["cq"] = str(gpu_quality)
+            if performance_profile == "quality":
+                config["preset"] = "p7"
+                config["tune"] = "hq"
+            else:  # speed
+                config["preset"] = "p1"
+                config["tune"] = "ll"
+
+        elif encoder == "h265_nvenc":
+            config["codec"] = "hevc_nvenc"
+            config["cq"] = str(gpu_quality)
+            if performance_profile == "quality":
+                config["preset"] = "p7"
+                config["tune"] = "hq"
+            else:  # speed
+                config["preset"] = "p1"
+                config["tune"] = "ll"
+
+        # Configurações de threads
+        if threads > 0:
+            config["threads"] = str(threads)
+
+        return config
+
+class OutputStage(PipelineStage):
+    """Estágio final que gera o vídeo de saída"""
+
+    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        import time
+
+        print("Iniciando renderização final...")
+        start_time = time.time()
+
+        inputs = ctx["inputs"]
+        filter_complex = ctx["filter_complex"]
+        map_out = ctx["map_out"]
+        audio_idx = ctx["audio_idx"]
+        out_path = ctx["out_path"]
+        encoder_config = ctx.get("encoder_config", {})
+
+        # Comando base
+        cmd = ["ffmpeg"] + inputs + ["-filter_complex", filter_complex, "-map", map_out, "-map", f"{audio_idx}:a"]
+
+        # Configurações do encoder
+        codec = encoder_config.get("codec", "libx264")
+        cmd.extend(["-c:v", codec])
+
+        # Configurações específicas por codec
+        if "nvenc" in codec:
+            if "cq" in encoder_config:
+                cmd.extend(["-cq", encoder_config["cq"]])
+            if "preset" in encoder_config:
+                cmd.extend(["-preset", encoder_config["preset"]])
+            if "tune" in encoder_config:
+                cmd.extend(["-tune", encoder_config["tune"]])
+        else:
+            if "preset" in encoder_config:
+                cmd.extend(["-preset", encoder_config["preset"]])
+            if "crf" in encoder_config:
+                cmd.extend(["-crf", encoder_config["crf"]])
+
+        # Threads
+        if "threads" in encoder_config:
+            cmd.extend(["-threads", encoder_config["threads"]])
+
+        # Configurações de áudio e saída
+        cmd.extend(["-c:a", "aac", "-b:a", "128k", str(out_path)])
+
+        # Executa o comando
+        run(cmd)
+
+        total_time = time.time() - start_time
+        print(f"Renderização final concluída em {total_time:.1f}s")
+
+        ctx["render_time"] = total_time
+        return ctx
 
 class MediaPipeline:
     def __init__(self, stages: TList[PipelineStage]):

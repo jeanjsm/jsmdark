@@ -6,7 +6,7 @@ from typing import Callable, Dict, Any, List as TList
 from audio_utils import duration_seconds
 from video_utils import list_videos, pick_segments_to_cover, list_images, pick_image_segments_to_cover
 from ffmpeg_utils import run
-from pipeline import MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage, TransitionStage, SubtitleStage, CinematicStage, ImageCacheStage
+from pipeline import MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage, TransitionStage, SubtitleStage, CinematicStage, ImageCacheStage, EncoderStage, OutputStage
 import json
 import argparse
 
@@ -58,6 +58,11 @@ def create_video_from_narration(
     remove_silence: bool = False,
     silence_threshold: int = -40,
     silence_duration: float = 0.5,
+    encoder: str = "libx264",
+    performance_profile: str = "quality",
+    threads: int = 0,
+    gpu_quality: int = 18,
+    resolution_preset: str = "horizontal_1080p",
 ):
     # Remove silêncio da narração se habilitado
     if remove_silence:
@@ -68,7 +73,7 @@ def create_video_from_narration(
             stop_duration=silence_duration
         )
 
-    stages = [ImageCacheStage(), VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), CinematicStage(), SubtitleStage()]
+    stages = [EncoderStage(), ImageCacheStage(), VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), CinematicStage(), SubtitleStage(), OutputStage()]
     ctx = {
         "narration_path": narration_path,
         "videos_folder": videos_folder,
@@ -113,25 +118,14 @@ def create_video_from_narration(
         "vignette_intensity": vignette_intensity,
         "enable_curves": enable_curves,
         "custom_curves": custom_curves,
+        "encoder": encoder,
+        "performance_profile": performance_profile,
+        "threads": threads,
+        "gpu_quality": gpu_quality,
+        "resolution_preset": resolution_preset,
     }
     pipeline = MediaPipeline(stages)
-    ctx = pipeline.run(ctx)
-    cmd = [
-        "ffmpeg",
-        *ctx["inputs"],
-        "-filter_complex", ctx["filter_complex"],
-        "-map", ctx["map_out"],
-        "-map", "0:a:0",
-        "-c:v", "libx264",
-        "-preset", preset,
-        "-crf", str(crf),
-        "-r", str(fps),
-        "-c:a", "aac",
-        "-b:a", "192k",
-        "-shortest",
-        str(ctx["out_path"])
-    ]
-    run(cmd)
+    return pipeline.run(ctx)
 
 
 if __name__ == "__main__":
@@ -195,6 +189,13 @@ if __name__ == "__main__":
     parser.add_argument("--silence_threshold", type=int, default=-40, help="Limite de silêncio (em dB)")
     parser.add_argument("--silence_duration", type=float, default=0.5, help="Duração mínima para considerar silêncio (em segundos)")
 
+    # Novos parâmetros para encoder
+    parser.add_argument("--encoder", default="libx264", help="Encoder a ser utilizado (libx264, h264_nvenc, etc.)")
+    parser.add_argument("--performance_profile", default="quality", help="Perfil de performance para o encoder (quality, speed, etc.)")
+    parser.add_argument("--threads", type=int, default=0, help="Número de threads para o encoder (0 para automático)")
+    parser.add_argument("--gpu_quality", type=int, default=18, help="Qualidade da codificação GPU (1 a 31, menor é melhor)")
+    parser.add_argument("--resolution_preset", default="horizontal_1080p", help="Preset de resolução (horizontal_1080p, vertical_720p, etc.)")
+
     args = parser.parse_args()
 
     chroma_list = json.loads(args.chroma_list) if args.chroma_list else None
@@ -245,4 +246,9 @@ if __name__ == "__main__":
         remove_silence=args.remove_silence,
         silence_threshold=args.silence_threshold,
         silence_duration=args.silence_duration,
+        encoder=args.encoder,
+        performance_profile=args.performance_profile,
+        threads=args.threads,
+        gpu_quality=args.gpu_quality,
+        resolution_preset=args.resolution_preset,
     )

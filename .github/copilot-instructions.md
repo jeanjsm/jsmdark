@@ -15,6 +15,7 @@ Always conform to the coding styles defined in styleguide.md in repo my-repo whe
 - Os imports devem ser mantidos no topo do arquivo, organizados por padrão (bibliotecas padrão, terceiros, locais) e sem duplicação.
 
 ## FFmpeg integration
+- Sempre otimize comandos FFmpeg para evitar processamento desnecessário, e para melhorar a performance e reduzir o tempo de execução.
 - Sempre que alterar partes que usam FFmpeg (diretamente via subprocess ou wrappers), preserve exemplos e comentários explicativos.
 - Não invente comandos FFmpeg: consulte sempre a documentação oficial ou scripts já no repositório.
 - Garanta que todo novo comando FFmpeg adicionado esteja documentado na função correspondente.

@@ -4,11 +4,12 @@ import subprocess
 from pathlib import Path
 from typing import List, Tuple
 import vosk
+from ffmpeg_utils import get_ffmpeg_path
 
 def extract_audio_for_transcription(video_path: str, output_path: str) -> None:
     """Extrai áudio do vídeo em formato WAV mono 16kHz para o Vosk."""
     cmd = [
-        "ffmpeg", "-y", "-i", video_path,
+        get_ffmpeg_path(), "-y", "-i", video_path,
         "-ar", "16000", "-ac", "1", "-f", "wav",
         output_path
     ]

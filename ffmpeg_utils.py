@@ -2,9 +2,28 @@ import subprocess
 import tempfile
 import os
 from typing import List
+from pathlib import Path
+
+def get_ffmpeg_path() -> str:
+    """Retorna o caminho para o executável FFmpeg local"""
+    current_dir = Path(__file__).parent
+    ffmpeg_path = current_dir / "_internal" / "ffmpeg" / "bin" / "ffmpeg.exe"
+
+    if ffmpeg_path.exists():
+        return str(ffmpeg_path)
+
+    # Fallback para FFmpeg no PATH se o local não existir
+    return "ffmpeg"
 
 def run(cmd: List[str]) -> subprocess.CompletedProcess:
     try:
+        # Substitui "ffmpeg" pelo caminho completo se necessário
+        if cmd[0] == "ffmpeg":
+            cmd[0] = get_ffmpeg_path()
+
+        # Debug: mostra o comando que será executado
+        print(f"[DEBUG] Executando comando: {cmd[0]} {' '.join(cmd[1:5])}...")
+
         # Verifica se há filter_complex muito longo
         filter_complex_idx = None
         for i, arg in enumerate(cmd):

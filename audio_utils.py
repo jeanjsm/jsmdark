@@ -2,15 +2,23 @@ import json
 import tempfile
 import os
 from pathlib import Path
-from ffmpeg_utils import run
+from ffmpeg_utils import run, get_ffmpeg_path
 
-FFPROBE_BIN = "ffprobe"
-FFMPEG_BIN = "ffmpeg"
+def get_ffprobe_path() -> str:
+    """Retorna o caminho para o executável FFprobe local"""
+    current_dir = Path(__file__).parent
+    ffprobe_path = current_dir / "_internal" / "ffmpeg" / "bin" / "ffprobe.exe"
+
+    if ffprobe_path.exists():
+        return str(ffprobe_path)
+
+    # Fallback para FFprobe no PATH se o local não existir
+    return "ffprobe"
 
 def duration_seconds(path: Path) -> float:
     """Obtém duração (segundos) via ffprobe."""
     cmd = [
-        FFPROBE_BIN, "-v", "error", "-hide_banner",
+        get_ffprobe_path(), "-v", "error", "-hide_banner",
         "-print_format", "json",
         "-show_format", "-show_streams",
         str(path)
@@ -52,7 +60,7 @@ def remove_audio_silence(input_path: str, output_path: str = None,
 
     # Comando FFmpeg para remover silêncios
     cmd = [
-        FFMPEG_BIN,
+        get_ffmpeg_path(),
         "-i", str(input_path),
         "-af", f"silenceremove=stop_periods=-1:stop_duration={stop_duration}:stop_threshold={threshold_db}dB",
         "-y", str(output_path)
