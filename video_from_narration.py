@@ -6,7 +6,7 @@ from typing import Callable, Dict, Any, List as TList
 from audio_utils import duration_seconds
 from video_utils import list_videos, pick_segments_to_cover, list_images, pick_image_segments_to_cover
 from ffmpeg_utils import run
-from pipeline import MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage, TransitionStage, SubtitleStage, CinematicStage
+from pipeline import MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage, TransitionStage, SubtitleStage, CinematicStage, ImageCacheStage
 import json
 import argparse
 
@@ -68,7 +68,7 @@ def create_video_from_narration(
             stop_duration=silence_duration
         )
 
-    stages = [VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), CinematicStage(), SubtitleStage()]
+    stages = [ImageCacheStage(), VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), CinematicStage(), SubtitleStage()]
     ctx = {
         "narration_path": narration_path,
         "videos_folder": videos_folder,

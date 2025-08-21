@@ -4,6 +4,8 @@ from typing import Dict, Any, List as TList
 from audio_utils import duration_seconds
 from video_utils import list_videos, pick_segments_to_cover, list_images, pick_image_segments_to_cover
 import random
+import hashlib
+from ffmpeg_utils import run
 
 class PipelineStage(ABC):
     @abstractmethod
@@ -67,50 +69,92 @@ class VideoBaseStage(PipelineStage):
             if not images:
                 raise FileNotFoundError(f"Nenhuma imagem com extensões suportadas em: {folder}")
             segments = pick_image_segments_to_cover(audio_dur, images, image_segment_duration, seed=seed)
-            ken_burns_enabled = ctx.get("enable_ken_burns", False)
+
+            # Usa vídeos em cache se disponível
+            cached_images = ctx.get("cached_images", {})
+
             for img, take in segments:
-                inputs += ["-loop", "1", "-t", f"{take:.3f}", "-i", str(img)]
-            for idx, (_, take) in enumerate(segments, start=1):
+                # Verifica se existe versão em cache
+                if str(img) in cached_images:
+                    # Usa o vídeo pré-renderizado do cache
+                    cached_video = cached_images[str(img)]
+                    inputs += ["-i", cached_video]
+                else:
+                    # Fallback: usa a imagem original
+                    inputs += ["-loop", "1", "-t", f"{take:.3f}", "-i", str(img)]
+
+            for idx, (img, take) in enumerate(segments, start=1):
                 label_in = f"{idx}:v"
                 take_str = f"{take:.3f}"
                 vout = f"v{idx}"
 
-                if ken_burns_enabled:
-                    # Ken Burns effect with zoompan - 5 posições aleatórias
-                    zoom_duration = int(take * fps)
+                ken_burns_enabled = ctx.get("enable_ken_burns", False)
 
-                    # Define as 5 posições de zoom
-                    zoom_positions = {
-                        "center": ("iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),
-                        "top_right": ("iw-iw/zoom", "0"),
-                        "top_left": ("0", "0"),
-                        "bottom_right": ("iw-iw/zoom", "ih-ih/zoom"),
-                        "bottom_left": ("0", "ih-ih/zoom")
-                    }
+                # Se usa cache, aplica apenas Ken Burns se habilitado
+                if str(img) in cached_images:
+                    if ken_burns_enabled:
+                        # Ken Burns effect com posição aleatória
+                        zoom_duration = int(take * fps)
+                        zoom_positions = {
+                            "center": ("iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),
+                            "top_right": ("iw-iw/zoom", "0"),
+                            "top_left": ("0", "0"),
+                            "bottom_right": ("iw-iw/zoom", "ih-ih/zoom"),
+                            "bottom_left": ("0", "ih-ih/zoom")
+                        }
+                        position = random.choice(list(zoom_positions.keys()))
+                        x_pos, y_pos = zoom_positions[position]
 
-                    # Escolhe posição aleatória
-                    position = random.choice(list(zoom_positions.keys()))
-                    x_pos, y_pos = zoom_positions[position]
-
-                    chain = (
-                        f"[{label_in}]"
-                        f"zoompan=z='min(zoom+0.0015,1.1)':d={zoom_duration}:x='{x_pos}':y='{y_pos}',"
-                        f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease,"
-                        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-                        f"setsar=1,"
-                        f"trim=0:{take_str},setpts=PTS-STARTPTS"
-                        f"[{vout}]"
-                    )
+                        chain = (
+                            f"[{label_in}]"
+                            f"zoompan=z='min(zoom+0.0015,1.1)':d={zoom_duration}:x='{x_pos}':y='{y_pos}',"
+                            f"trim=0:{take_str},setpts=PTS-STARTPTS"
+                            f"[{vout}]"
+                        )
+                    else:
+                        chain = (
+                            f"[{label_in}]"
+                            f"trim=0:{take_str},setpts=PTS-STARTPTS"
+                            f"[{vout}]"
+                        )
                 else:
-                    chain = (
-                        f"[{label_in}]"
-                        f"fps={fps},"
-                        f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease,"
-                        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-                        f"setsar=1,"
-                        f"trim=0:{take_str},setpts=PTS-STARTPTS"
-                        f"[{vout}]"
-                    )
+                    # Fallback: processamento original da imagem
+                    if ken_burns_enabled:
+                        # Ken Burns effect with zoompan - 5 posições aleatórias
+                        zoom_duration = int(take * fps)
+
+                        # Define as 5 posições de zoom
+                        zoom_positions = {
+                            "center": ("iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),
+                            "top_right": ("iw-iw/zoom", "0"),
+                            "top_left": ("0", "0"),
+                            "bottom_right": ("iw-iw/zoom", "ih-ih/zoom"),
+                            "bottom_left": ("0", "ih-ih/zoom")
+                        }
+
+                        # Escolhe posição aleatória
+                        position = random.choice(list(zoom_positions.keys()))
+                        x_pos, y_pos = zoom_positions[position]
+
+                        chain = (
+                            f"[{label_in}]"
+                            f"zoompan=z='min(zoom+0.0015,1.1)':d={zoom_duration}:x='{x_pos}':y='{y_pos}',"
+                            f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease,"
+                            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+                            f"setsar=1,"
+                            f"trim=0:{take_str},setpts=PTS-STARTPTS"
+                            f"[{vout}]"
+                        )
+                    else:
+                        chain = (
+                            f"[{label_in}]"
+                            f"fps={fps},"
+                            f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease,"
+                            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+                            f"setsar=1,"
+                            f"trim=0:{take_str},setpts=PTS-STARTPTS"
+                            f"[{vout}]"
+                        )
                 vf_parts.append(chain)
                 vlabels.append(f"[{vout}]")
             concat = "".join(vlabels) + f"concat=n={len(segments)}:v=1:a=0[vout]"
@@ -443,6 +487,85 @@ class SubtitleStage(PipelineStage):
 
             ctx["filter_complex"] = filter_complex
         return ctx
+
+class ImageCacheStage(PipelineStage):
+    """Pré-renderiza imagens em vídeos curtos para cache"""
+
+    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        video_mode = ctx.get("video_mode")
+        if video_mode != "images":
+            return ctx
+
+        # Configurações
+        out_path = ctx["out_path"]
+        cache_dir = Path(out_path).parent / "cache"
+        cache_dir.mkdir(exist_ok=True)
+
+        videos_folder = ctx["videos_folder"]
+        image_segment_duration = ctx["image_segment_duration"]
+        fps = ctx["fps"]
+        width = ctx["width"]
+        height = ctx["height"]
+        enable_ken_burns = ctx.get("enable_ken_burns", False)
+
+        # Lista imagens disponíveis
+        folder = Path(videos_folder)
+        images = list_images(folder)
+        if not images:
+            return ctx
+
+        # Processa cada imagem única
+        cached_videos = {}
+
+        for img_path in images:
+            # Gera hash único baseado no caminho da imagem e configurações
+            img_config = f"{img_path}_{width}x{height}_{fps}fps_{image_segment_duration}s_{enable_ken_burns}"
+            img_hash = hashlib.md5(img_config.encode()).hexdigest()[:12]
+            cached_video_path = cache_dir / f"img_{img_hash}.mp4"
+
+            # Se já existe no cache, pula
+            if cached_video_path.exists():
+                cached_videos[str(img_path)] = str(cached_video_path)
+                continue
+
+            # Pré-renderiza a imagem
+            self._prerender_image(
+                img_path,
+                cached_video_path,
+                image_segment_duration,
+                fps,
+                width,
+                height,
+                enable_ken_burns
+            )
+
+            cached_videos[str(img_path)] = str(cached_video_path)
+
+        # Adiciona mapeamento ao contexto
+        ctx["cached_images"] = cached_videos
+        return ctx
+
+    def _prerender_image(self, img_path, output_path, duration, fps, width, height, ken_burns):
+        """Renderiza uma imagem em vídeo curto sem efeitos"""
+
+        # Pré-renderização simples sem efeitos - apenas escala e padding
+        video_filter = (
+            f"fps={fps},"
+            f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+            f"setsar=1"
+        )
+
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-loop", "1", "-t", f"{duration:.3f}", "-i", str(img_path),
+            "-vf", video_filter,
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            "-r", str(fps), "-an",
+            str(output_path)
+        ]
+
+        run(cmd)
 
 class MediaPipeline:
     def __init__(self, stages: TList[PipelineStage]):
