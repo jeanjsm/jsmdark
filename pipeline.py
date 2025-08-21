@@ -920,7 +920,38 @@ class OutputStage(PipelineStage):
             filter_complex = ctx.get("filter_complex", "")
             cmd.extend(["-filter_complex", filter_complex])
 
-        cmd.extend(["-map", map_out, "-map", f"{audio_idx}:a"])
+        cmd.extend(["-map", map_out])
+
+        # Processamento de áudio com trilha de fundo
+        background_music_idx = ctx.get("background_music_idx")
+        background_music_volume = ctx.get("background_music_volume", 0.2)
+
+        if background_music_idx is not None:
+            # Calcula duração da narração para repetir a música
+            from audio_utils import duration_seconds
+            narration_duration = duration_seconds(ctx["narration_path"])
+
+            # Cria filtro de áudio que repete a música e mixa com a narração
+            audio_filter = (
+                f"[{background_music_idx}:a]aloop=loop=-1:size=2e+09,volume={background_music_volume}[bg];"
+                f"[{audio_idx}:a][bg]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+            )
+
+            # Adiciona filtro de áudio ao filtro complexo existente
+            if use_filter_file and ctx.get("filter_complex_file"):
+                with open(ctx["filter_complex_file"], 'r') as f:
+                    filter_complex = f.read()
+                filter_complex = f"{filter_complex};{audio_filter}"
+                with open(ctx["filter_complex_file"], 'w') as f:
+                    f.write(filter_complex)
+            else:
+                filter_complex = ctx.get("filter_complex", "")
+                filter_complex = f"{filter_complex};{audio_filter}"
+                cmd[cmd.index("-filter_complex") + 1] = filter_complex
+
+            cmd.extend(["-map", "[aout]"])
+        else:
+            cmd.extend(["-map", f"{audio_idx}:a"])
 
         # Configurações do encoder
         codec = encoder_config.get("codec", "libx264")
@@ -985,4 +1016,34 @@ class MediaPipeline:
     def run(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         for stage in self.stages:
             ctx = stage(ctx)
+        return ctx
+
+class BackgroundMusicStage(PipelineStage):
+    """Estágio que adiciona trilha de fundo ao áudio"""
+
+    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        background_music = ctx.get("background_music")
+        background_music_volume = ctx.get("background_music_volume", 0.2)
+
+        if not background_music:
+            return ctx
+
+        from pathlib import Path
+        music_path = Path(background_music)
+        if not music_path.exists():
+            print(f"Aviso: Arquivo de música de fundo não encontrado: {background_music}")
+            return ctx
+
+        print(f"Adicionando trilha de fundo: {background_music} (volume: {background_music_volume})")
+
+        # Adiciona a música de fundo aos inputs
+        inputs = ctx["inputs"]
+        inputs.extend(["-i", str(music_path)])
+
+        # Atualiza índice da música de fundo
+        music_idx = len([inp for inp in inputs if inp == "-i"]) - 1
+        ctx["background_music_idx"] = music_idx
+        ctx["background_music_volume"] = background_music_volume
+        ctx["inputs"] = inputs
+
         return ctx

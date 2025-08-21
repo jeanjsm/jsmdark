@@ -6,7 +6,7 @@ from typing import Callable, Dict, Any, List as TList
 from audio_utils import duration_seconds
 from video_utils import list_videos, pick_segments_to_cover, list_images, pick_image_segments_to_cover
 from ffmpeg_utils import run
-from pipeline import MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage, TransitionStage, SubtitleStage, CinematicStage, ImageCacheStage, EncoderStage, OutputStage
+from pipeline import MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage, TransitionStage, SubtitleStage, CinematicStage, ImageCacheStage, EncoderStage, OutputStage, BackgroundMusicStage
 import json
 import argparse
 
@@ -63,6 +63,8 @@ def create_video_from_narration(
     threads: int = 0,
     gpu_quality: int = 18,
     resolution_preset: str = "horizontal_1080p",
+    background_music: str = None,
+    background_music_volume: float = 0.2,
 ):
     # Remove silêncio da narração se habilitado
     if remove_silence:
@@ -73,7 +75,7 @@ def create_video_from_narration(
             stop_duration=silence_duration
         )
 
-    stages = [EncoderStage(), ImageCacheStage(), VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), CinematicStage(), SubtitleStage(), OutputStage()]
+    stages = [EncoderStage(), ImageCacheStage(), VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), CinematicStage(), SubtitleStage(), BackgroundMusicStage(), OutputStage()]
     ctx = {
         "narration_path": narration_path,
         "videos_folder": videos_folder,
@@ -123,6 +125,8 @@ def create_video_from_narration(
         "threads": threads,
         "gpu_quality": gpu_quality,
         "resolution_preset": resolution_preset,
+        "background_music": background_music,
+        "background_music_volume": background_music_volume,
     }
     pipeline = MediaPipeline(stages)
     return pipeline.run(ctx)
@@ -196,6 +200,10 @@ if __name__ == "__main__":
     parser.add_argument("--gpu_quality", type=int, default=18, help="Qualidade da codificação GPU (1 a 31, menor é melhor)")
     parser.add_argument("--resolution_preset", default="horizontal_1080p", help="Preset de resolução (horizontal_1080p, vertical_720p, etc.)")
 
+    # Novos parâmetros para trilha de fundo
+    parser.add_argument("--background_music", default=None, help="Arquivo de áudio para trilha de fundo (mp3, wav, etc.)")
+    parser.add_argument("--background_music_volume", type=float, default=0.2, help="Volume da trilha de fundo (0.0 a 1.0)")
+
     args = parser.parse_args()
 
     chroma_list = json.loads(args.chroma_list) if args.chroma_list else None
@@ -251,4 +259,6 @@ if __name__ == "__main__":
         threads=args.threads,
         gpu_quality=args.gpu_quality,
         resolution_preset=args.resolution_preset,
+        background_music=args.background_music,
+        background_music_volume=args.background_music_volume,
     )
