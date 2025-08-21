@@ -287,7 +287,11 @@ class TransitionStage(PipelineStage):
         "coverright", "coverup", "coverdown", "revealleft", "revealright",
         "revealup", "revealdown"
     ]
-
+    # Subconjunto de transições leves para random
+    LIGHT_TRANSITIONS = [
+        "fade", "wipeleft", "wiperight", "wipeup", "wipedown",
+        "slideleft", "slideright", "slideup", "slidedown", "dissolve"
+    ]
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         transition_type = ctx.get("transition_type", "none")
         if transition_type == "none":
@@ -300,55 +304,109 @@ class TransitionStage(PipelineStage):
         existing_filter = ctx.get("filter_complex", "")
         fps = ctx.get("fps", 30)
 
-        # 1) Normaliza CADA [vN] antes de entrar em qualquer xfade
-        #    Isso evita "current rate of 1/0" já no primeiro xfade.
+        # OTIMIZAÇÃO: Em vez de processar cada imagem separadamente e depois aplicar
+        # transições em cascata, vamos criar um filter graph mais eficiente
+
+        # 1) Prepara entradas de vídeo com configurações uniformes - apenas uma vez
         prep_filters = []
         clean_labels = []
         for i in range(1, len(segments) + 1):
             src = f"v{i}"
-            dst = f"vc{i}"           # "v-clean"
+            dst = f"vc{i}"  # "v-clean"
+            # Aplica configurações básicas uniformes apenas uma vez por imagem
             prep_filters.append(f"[{src}]settb=AVTB,fps={fps},format=yuv420p[{dst}]")
             clean_labels.append(dst)
 
-        # 2) Encadeia as transições usando as labels normalizadas
+        # 2) Transições em grupos paralelos, sem encadeamento excessivo
         transition_opts = [t for t in self.SUPPORTED_TRANSITIONS if t != "fade"]
 
-        prev_label = clean_labels[0]
-        prev_dur = segments[0][1]  # duração do primeiro take
-        transitions = []
+        # Vamos processar em grupos de 4-6 imagens para evitar cascata muito longa
+        group_size = min(6, max(4, len(segments) // 3))
+        if len(segments) <= group_size:
+            # Se tivermos poucas imagens, usamos o método original
+            group_size = len(segments)
 
-        for i in range(1, len(segments)):
-            if transition_type == "random":
-                ttype = random.choice(transition_opts)
-            else:
-                ttype = transition_type if transition_type in self.SUPPORTED_TRANSITIONS else "fade"
+        groups = []
+        for i in range(0, len(clean_labels), group_size):
+            groups.append(clean_labels[i:i+group_size])
 
-            curr_label = clean_labels[i]
-            curr_dur = segments[i][1]
+        # Processa cada grupo separadamente
+        group_outputs = []
+        group_filters = []
 
-            # offset relativo ao primeiro input do xfade atual
-            offset = max(prev_dur - 1, 0)
+        for group_idx, group in enumerate(groups):
+            if len(group) == 1:
+                # Se só tem um item no grupo, não precisa de transição
+                group_outputs.append(group[0])
+                continue
 
-            mid = f"t{i}"
-            out = f"trans{i}"
-            # xfade -> normaliza a SAÍDA para alimentar o próximo xfade
-            trans = (
-                f"[{prev_label}][{curr_label}]xfade=transition={ttype}:duration=1:offset={offset}[{mid}];"
-                f"[{mid}]settb=AVTB,fps={fps},format=yuv420p[{out}]"
-            )
-            transitions.append(trans)
+            # Processa transições dentro do grupo
+            prev_label = group[0]
+            prev_dur = segments[group_idx * group_size][1]  # duração do primeiro take no grupo
+            transitions = []
 
-            prev_label = out
-            prev_dur = prev_dur + curr_dur - 1
+            for i in range(1, len(group)):
+                global_idx = group_idx * group_size + i
+                if global_idx >= len(segments):  # Proteção contra índice fora do limite
+                    continue
 
-        # 3) Remove o concat original e injeta prep + transições
-        filter_parts = existing_filter.split(";")
-        filter_parts = [f for f in filter_parts if "concat=" not in f]
+                if transition_type == "random":
+                    ttype = random.choice(transition_opts)
+                else:
+                    ttype = transition_type if transition_type in self.SUPPORTED_TRANSITIONS else "fade"
+
+                curr_label = group[i]
+                curr_dur = segments[global_idx][1]
+
+                # offset relativo ao primeiro input do xfade atual
+                offset = max(prev_dur - 1, 0)
+
+                mid = f"t{group_idx}_{i}"
+                out = f"trans{group_idx}_{i}"
+                trans = (
+                    f"[{prev_label}][{curr_label}]xfade=transition={ttype}:duration=1:offset={offset}[{out}]"
+                )
+                transitions.append(trans)
+
+                prev_label = out
+                prev_dur = prev_dur + curr_dur - 1
+
+            # Adiciona as transições do grupo
+            group_filters.extend(transitions)
+            # Último output do grupo
+            if transitions:  # Se tiver transições, usa o último label de saída
+                group_outputs.append(prev_label)
+            else:  # Caso contrário, usa a primeira entrada limpa
+                group_outputs.append(group[0])
+
+        # 3) Concatena os grupos
+        if len(group_outputs) > 1:
+            concat_labels = "".join(f"[{label}]" for label in group_outputs)
+            final_out = "vout"  # Mudança: usar "vout" em vez de "final_out"
+            concat_filter = f"{concat_labels}concat=n={len(group_outputs)}:v=1:a=0[{final_out}]"
+            group_filters.append(concat_filter)
+            final_label = f"[{final_out}]"  # Adicionamos os colchetes aqui
+        else:
+            final_label = f"[{group_outputs[0]}]"
+
+        # 4) Recria o filter_complex removendo o concat original
+        filter_parts = [f for f in existing_filter.split(";") if "concat=" not in f]
         filter_parts.extend(prep_filters)
-        filter_parts.extend(transitions)
+        filter_parts.extend(group_filters)
 
-        ctx["filter_complex"] = ";".join(filter_parts)
-        ctx["map_out"] = f"[{prev_label}]"
+        # Cria filter_complex como arquivo temporário se for muito grande
+        filter_complex = ";".join(filter_parts)
+        if len(filter_complex) > 50000:
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                f.write(filter_complex)
+                ctx["filter_complex_file"] = f.name
+                ctx["use_filter_complex_file"] = True
+        else:
+            ctx["filter_complex"] = filter_complex
+            ctx["use_filter_complex_file"] = False
+
+        ctx["map_out"] = final_label
         return ctx
 
 class CinematicStage(PipelineStage):
@@ -738,6 +796,12 @@ class OutputStage(PipelineStage):
 
         # Configurações de áudio e saída
         cmd.extend(["-c:a", "aac", "-b:a", "128k", str(out_path)])
+
+        # Log completo do comando
+        print("\nComando FFmpeg completo:")
+        cmd_str = " ".join([str(c) for c in cmd])
+        print(cmd_str)
+        print("\n")
 
         # Executa o comando
         run(cmd)
