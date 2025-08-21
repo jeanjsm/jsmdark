@@ -55,8 +55,20 @@ def create_video_from_narration(
     vignette_intensity: float = 1,
     enable_curves: bool = False,
     custom_curves: str = None,
+    remove_silence: bool = False,
+    silence_threshold: int = -40,
+    silence_duration: float = 0.5,
 ):
-    stages = [VideoBaseStage(), TransitionStage(), OverlayStage(), CinematicStage(), LogoStage(), ChromaStage(), SubtitleStage()]
+    # Remove silêncio da narração se habilitado
+    if remove_silence:
+        from audio_utils import remove_audio_silence
+        narration_path = remove_audio_silence(
+            narration_path,
+            threshold_db=silence_threshold,
+            stop_duration=silence_duration
+        )
+
+    stages = [VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), CinematicStage(), SubtitleStage()]
     ctx = {
         "narration_path": narration_path,
         "videos_folder": videos_folder,
@@ -130,8 +142,8 @@ if __name__ == "__main__":
     parser.add_argument("--saida", default="output.mp4", help="Arquivo de saída (default: output.mp4)")
     parser.add_argument("--seed", type=int, default=None, help="Seed para sorteio dos vídeos/imagens")
     parser.add_argument("--fps", type=int, default=30, help="Frames por segundo do vídeo final")
-    parser.add_argument("--width", type=int, default=1920, help="Largura do vídeo final")
-    parser.add_argument("--height", type=int, default=1080, help="Altura do vídeo final")
+    parser.add_argument("--width", type=int, default=854, help="Largura do vídeo final")
+    parser.add_argument("--height", type=int, default=480, help="Altura do vídeo final")
     parser.add_argument("--crf", type=int, default=18, help="CRF do x264 (qualidade, menor é melhor)")
     parser.add_argument("--preset", default="medium", help="Preset do x264 (ultrafast, fast, medium, slow, etc)")
     parser.add_argument("--video_mode", choices=["videos", "images"], default="videos", help="Modo de montagem: videos ou images")
@@ -179,6 +191,9 @@ if __name__ == "__main__":
     parser.add_argument("--vignette_intensity", type=float, default=0.3, help="Intensidade do vignette (0.1 a 1.0)")
     parser.add_argument("--enable_curves", action="store_true", help="Habilita ajuste de curves do preset")
     parser.add_argument("--custom_curves", default=None, help="Curves customizadas (formato FFmpeg)")
+    parser.add_argument("--remove_silence", default=True, action="store_true", help="Remove silêncio da narração")
+    parser.add_argument("--silence_threshold", type=int, default=-40, help="Limite de silêncio (em dB)")
+    parser.add_argument("--silence_duration", type=float, default=0.5, help="Duração mínima para considerar silêncio (em segundos)")
 
     args = parser.parse_args()
 
@@ -227,4 +242,7 @@ if __name__ == "__main__":
         vignette_intensity=args.vignette_intensity,
         enable_curves=args.enable_curves,
         custom_curves=args.custom_curves,
+        remove_silence=args.remove_silence,
+        silence_threshold=args.silence_threshold,
+        silence_duration=args.silence_duration,
     )
