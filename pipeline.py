@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, Any, List as TList
 from audio_utils import duration_seconds
+from subtitle_utils import group_words_by_count
 from video_utils import list_videos, pick_segments_to_cover, list_images, pick_image_segments_to_cover
 import random
 import hashlib
@@ -603,7 +604,7 @@ class CinematicStage(PipelineStage):
 class SubtitleStage(PipelineStage):
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         if ctx.get("enable_subtitles"):
-            from subtitle_utils import extract_audio_for_transcription, transcribe_audio, create_subtitle_filter
+            from subtitle_utils import extract_audio_for_transcription, transcribe_audio, generate_ass_file
             import tempfile
             import os
 
@@ -611,7 +612,7 @@ class SubtitleStage(PipelineStage):
             subtitle_font_size = ctx.get("subtitle_font_size", 24)
             subtitle_color = ctx.get("subtitle_color", "white")
             subtitle_position = ctx.get("subtitle_position", "bottom_center")
-            subtitle_font = ctx.get("subtitle_font", None)
+            subtitle_font = ctx.get("subtitle_font", "Noto Sans")
             words_per_subtitle = ctx.get("words_per_subtitle", 1)
             vosk_model_path = ctx.get("vosk_model_path", "_internal/vosk_models/vosk-model-pt")
 
@@ -629,41 +630,71 @@ class SubtitleStage(PipelineStage):
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio:
                 temp_audio_path = temp_audio.name
 
+            # Arquivo ASS temporário
+            with tempfile.NamedTemporaryFile(suffix=".ass", delete=False) as temp_ass:
+                ass_file_path = temp_ass.name
+
             try:
                 extract_audio_for_transcription(narration_path, temp_audio_path)
                 segments = transcribe_audio(temp_audio_path, vosk_model_path)
 
                 if segments:
-                    subtitle_filter = create_subtitle_filter(
-                        segments,
-                        subtitle_font_size,
-                        subtitle_color,
-                        subtitle_position,
-                        words_per_subtitle,
-                        subtitle_font,
-                        ctx.get("subtitle_outline_color", "black"),
-                        ctx.get("subtitle_outline_width", 2),
-                        ctx.get("subtitle_shadow_color", "black"),
-                        ctx.get("subtitle_shadow_x", 2),
-                        ctx.get("subtitle_shadow_y", 2)
-                    )
-                    if subtitle_filter:
-                        filter_complex = f"{filter_complex};{map_out}{subtitle_filter}[vsubtitles]"
-                        ctx["map_out"] = "[vsubtitles]"
+                    # Converte posição para alignment ASS
+                    alignment_map = {
+                        "bottom_center": 2,
+                        "bottom_left": 1,
+                        "bottom_right": 3,
+                        "center": 5,
+                        "top_left": 7,
+                        "top_center": 8,
+                        "top_right": 9
+                    }
+                    alignment = alignment_map.get(subtitle_position, 2)
 
-                        # Atualiza arquivo ou variável
-                        if len(filter_complex) > 32768:
-                            if use_filter_file:
-                                with open(ctx["filter_complex_file"], 'w') as f:
-                                    f.write(filter_complex)
-                            else:
-                                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                                    f.write(filter_complex)
-                                    ctx["filter_complex_file"] = f.name
-                                    ctx["use_filter_complex_file"] = True
+                    # Converte cor para formato ASS (BGR)
+                    color_ass = "&H00FFFFFF&"  # Branco padrão
+                    if subtitle_color == "yellow":
+                        color_ass = "&H0000FFFF&"
+                    elif subtitle_color == "red":
+                        color_ass = "&H000000FF&"
+                    elif subtitle_color == "blue":
+                        color_ass = "&H00FF0000&"
+
+                    grouped = group_words_by_count(segments, words_per_subtitle)
+                    # Gera arquivo ASS
+                    generate_ass_file(
+                        grouped,
+                        ass_file_path,
+                        font=subtitle_font,
+                        size=subtitle_font_size,
+                        color=color_ass,
+                        alignment=alignment,
+                        playres_x=ctx.get("width", 1920),
+                        playres_y=ctx.get("height", 1080)
+                    )
+
+                    # Aplica filtro subtitles no vídeo
+                    # Escapa corretamente o caminho para Windows/FFmpeg
+                    ass_path_escaped = str(Path(ass_file_path)).replace('\\', '\\\\').replace(':', '\\:')
+                    # Usa sintaxe correta do filtro subtitles
+                    subtitle_filter = f"subtitles=filename='{ass_path_escaped}'"
+                    filter_complex = f"{filter_complex};{map_out}{subtitle_filter}[vsubtitles]"
+                    ctx["map_out"] = "[vsubtitles]"
+                    ctx["subtitle_file"] = ass_file_path  # Salva para limpeza posterior
+
+                    # Atualiza arquivo ou variável
+                    if len(filter_complex) > 32768:
+                        if use_filter_file:
+                            with open(ctx["filter_complex_file"], 'w') as f:
+                                f.write(filter_complex)
                         else:
-                            ctx["filter_complex"] = filter_complex
-                            ctx["use_filter_complex_file"] = False
+                            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                                f.write(filter_complex)
+                                ctx["filter_complex_file"] = f.name
+                                ctx["use_filter_complex_file"] = True
+                    else:
+                        ctx["filter_complex"] = filter_complex
+                        ctx["use_filter_complex_file"] = False
 
             finally:
                 if os.path.exists(temp_audio_path):
@@ -992,6 +1023,10 @@ class OutputStage(PipelineStage):
                 filter_file = ctx["filter_complex_file"]
                 if os.path.exists(filter_file):
                     os.unlink(filter_file)
+
+            # Remove arquivo ASS temporário se existir
+            if ctx.get("subtitle_file") and os.path.exists(ctx["subtitle_file"]):
+                os.unlink(ctx["subtitle_file"])
 
             # Remove arquivos de comando .txt da pasta cache
             cache_dir = Path(out_path).parent / "cache"

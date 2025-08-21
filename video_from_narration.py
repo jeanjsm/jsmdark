@@ -172,7 +172,7 @@ if __name__ == "__main__":
     parser.add_argument("--subtitle_position", default="center", choices=[
         "top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right", "center"
     ], help="Posição das legendas na tela")
-    parser.add_argument("--subtitle_font", default=None, help="Fonte das legendas (caminho do arquivo ou nome da fonte instalada)")
+    parser.add_argument("--subtitle_font", default="./_internal/_fonts/BebasNeue-Regular.ttf", help="Fonte das legendas (caminho do arquivo ou nome da fonte instalada)")
     parser.add_argument("--words_per_subtitle", type=int, default=5, help="Número de palavras por legenda")
     parser.add_argument("--vosk_model_path", default="_internal/vosk_models/vosk-model-pt", help="Caminho para o modelo do Vosk")
     parser.add_argument("--subtitle_outline_color", default="black", help="Cor do contorno das legendas (em formato hexadecimal ou nome da cor)")
