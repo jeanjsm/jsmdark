@@ -162,8 +162,19 @@ class VideoBaseStage(PipelineStage):
             filter_complex = ";".join(vf_parts + [concat])
         else:
             raise ValueError(f"Modo de vídeo inválido: {video_mode}. Use 'videos' ou 'images'.")
+
+        # Salva filter_complex em arquivo se muito grande
+        if len(filter_complex) > 32768:  # 32KB limit
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                f.write(filter_complex)
+                ctx["filter_complex_file"] = f.name
+                ctx["use_filter_complex_file"] = True
+        else:
+            ctx["filter_complex"] = filter_complex
+            ctx["use_filter_complex_file"] = False
+
         ctx["inputs"] = inputs
-        ctx["filter_complex"] = filter_complex
         ctx["map_out"] = "[vout]"
         ctx["audio_idx"] = 0
         ctx["segments"] = segments
@@ -175,7 +186,15 @@ class OverlayStage(PipelineStage):
             overlay = ctx["overlay"]
             overlay_opacity = ctx["overlay_opacity"]
             inputs = ctx["inputs"]
-            filter_complex = ctx["filter_complex"]
+            use_filter_file = ctx.get("use_filter_complex_file", False)
+
+            if use_filter_file:
+                # Lê o filtro do arquivo
+                with open(ctx["filter_complex_file"], 'r') as f:
+                    filter_complex = f.read()
+            else:
+                filter_complex = ctx["filter_complex"]
+
             map_out = ctx["map_out"]
             audio_idx = ctx["audio_idx"]
             overlay_path = str(overlay)
@@ -184,8 +203,25 @@ class OverlayStage(PipelineStage):
             overlay_filter = f"[{overlay_idx}:v]format=rgba,colorchannelmixer=aa={overlay_opacity}[ol];{map_out}[ol]overlay=shortest=1:format=auto[vfinal]"
             filter_complex = f"{filter_complex};{overlay_filter}"
             map_out = "[vfinal]"
+
+            # Atualiza arquivo ou variável
+            if len(filter_complex) > 32768:
+                import tempfile
+                if use_filter_file:
+                    # Sobrescreve arquivo existente
+                    with open(ctx["filter_complex_file"], 'w') as f:
+                        f.write(filter_complex)
+                else:
+                    # Cria novo arquivo
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                        f.write(filter_complex)
+                        ctx["filter_complex_file"] = f.name
+                        ctx["use_filter_complex_file"] = True
+            else:
+                ctx["filter_complex"] = filter_complex
+                ctx["use_filter_complex_file"] = False
+
             ctx["inputs"] = inputs
-            ctx["filter_complex"] = filter_complex
             ctx["map_out"] = map_out
             ctx["audio_idx"] = audio_idx
         return ctx
@@ -199,11 +235,18 @@ class LogoStage(PipelineStage):
             width = ctx.get("width", 1920)
             height = ctx.get("height", 1080)
             inputs = ctx["inputs"]
-            filter_complex = ctx["filter_complex"]
+            use_filter_file = ctx.get("use_filter_complex_file", False)
+
+            if use_filter_file:
+                with open(ctx["filter_complex_file"], 'r') as f:
+                    filter_complex = f.read()
+            else:
+                filter_complex = ctx["filter_complex"]
+
             map_out = ctx["map_out"]
             logo_idx = sum(1 for x in inputs if x == "-i")
             inputs += ["-i", str(logo)]
-            # Calcula posição
+
             pos_map = {
                 "top_left": (20, 20),
                 "top_center": (f"(main_w-overlay_w)/2", 20),
@@ -220,8 +263,23 @@ class LogoStage(PipelineStage):
             )
             filter_complex = f"{filter_complex};{logo_filter}"
             map_out = "[vlogo]"
+
+            # Atualiza arquivo ou variável
+            if len(filter_complex) > 32768:
+                import tempfile
+                if use_filter_file:
+                    with open(ctx["filter_complex_file"], 'w') as f:
+                        f.write(filter_complex)
+                else:
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                        f.write(filter_complex)
+                        ctx["filter_complex_file"] = f.name
+                        ctx["use_filter_complex_file"] = True
+            else:
+                ctx["filter_complex"] = filter_complex
+                ctx["use_filter_complex_file"] = False
+
             ctx["inputs"] = inputs
-            ctx["filter_complex"] = filter_complex
             ctx["map_out"] = map_out
         return ctx
 
@@ -238,7 +296,14 @@ class ChromaStage(PipelineStage):
             }]
         if chroma_list:
             inputs = ctx["inputs"]
-            filter_complex = ctx["filter_complex"]
+            use_filter_file = ctx.get("use_filter_complex_file", False)
+
+            if use_filter_file:
+                with open(ctx["filter_complex_file"], 'r') as f:
+                    filter_complex = f.read()
+            else:
+                filter_complex = ctx["filter_complex"]
+
             map_out = ctx["map_out"]
             from audio_utils import duration_seconds
             pos_map = {
@@ -267,8 +332,23 @@ class ChromaStage(PipelineStage):
                 )
                 filter_complex = f"{filter_complex};{chroma_filter}"
                 last_map = f"[vchroma{chroma_idx}]"
+
+            # Atualiza arquivo ou variável
+            if len(filter_complex) > 32768:
+                import tempfile
+                if use_filter_file:
+                    with open(ctx["filter_complex_file"], 'w') as f:
+                        f.write(filter_complex)
+                else:
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                        f.write(filter_complex)
+                        ctx["filter_complex_file"] = f.name
+                        ctx["use_filter_complex_file"] = True
+            else:
+                ctx["filter_complex"] = filter_complex
+                ctx["use_filter_complex_file"] = False
+
             ctx["inputs"] = inputs
-            ctx["filter_complex"] = filter_complex
             ctx["map_out"] = last_map
         return ctx
 
@@ -446,7 +526,15 @@ class CinematicStage(PipelineStage):
         if not any([cinematic_preset, custom_lut, enable_vignette, enable_curves]):
             return ctx
 
-        filter_complex = ctx["filter_complex"]
+        use_filter_file = ctx.get("use_filter_complex_file", False)
+
+        if use_filter_file:
+            # Lê o filtro do arquivo
+            with open(ctx["filter_complex_file"], 'r') as f:
+                filter_complex = f.read()
+        else:
+            filter_complex = ctx["filter_complex"]
+
         map_out = ctx["map_out"]
 
         cinematic_filters = []
@@ -490,7 +578,24 @@ class CinematicStage(PipelineStage):
             cinematic_out = "[vcinematic]"
             cinematic_filter = f"{map_out}{cinematic_chain}{cinematic_out}"
             filter_complex = f"{filter_complex};{cinematic_filter}"
-            ctx["filter_complex"] = filter_complex
+
+            # Atualiza arquivo ou variável
+            if len(filter_complex) > 32768:
+                import tempfile
+                if use_filter_file:
+                    # Sobrescreve arquivo existente
+                    with open(ctx["filter_complex_file"], 'w') as f:
+                        f.write(filter_complex)
+                else:
+                    # Cria novo arquivo
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                        f.write(filter_complex)
+                        ctx["filter_complex_file"] = f.name
+                        ctx["use_filter_complex_file"] = True
+            else:
+                ctx["filter_complex"] = filter_complex
+                ctx["use_filter_complex_file"] = False
+
             ctx["map_out"] = cinematic_out
 
         return ctx
@@ -510,7 +615,14 @@ class SubtitleStage(PipelineStage):
             words_per_subtitle = ctx.get("words_per_subtitle", 1)
             vosk_model_path = ctx.get("vosk_model_path", "_internal/vosk_models/vosk-model-pt")
 
-            filter_complex = ctx["filter_complex"]
+            use_filter_file = ctx.get("use_filter_complex_file", False)
+
+            if use_filter_file:
+                with open(ctx["filter_complex_file"], 'r') as f:
+                    filter_complex = f.read()
+            else:
+                filter_complex = ctx["filter_complex"]
+
             map_out = ctx["map_out"]
 
             # Extrai áudio temporário para transcrição
@@ -536,15 +648,27 @@ class SubtitleStage(PipelineStage):
                         ctx.get("subtitle_shadow_y", 2)
                     )
                     if subtitle_filter:
-                        # Aplica legendas como novo filtro no mapa atual
                         filter_complex = f"{filter_complex};{map_out}{subtitle_filter}[vsubtitles]"
                         ctx["map_out"] = "[vsubtitles]"
+
+                        # Atualiza arquivo ou variável
+                        if len(filter_complex) > 32768:
+                            if use_filter_file:
+                                with open(ctx["filter_complex_file"], 'w') as f:
+                                    f.write(filter_complex)
+                            else:
+                                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                                    f.write(filter_complex)
+                                    ctx["filter_complex_file"] = f.name
+                                    ctx["use_filter_complex_file"] = True
+                        else:
+                            ctx["filter_complex"] = filter_complex
+                            ctx["use_filter_complex_file"] = False
 
             finally:
                 if os.path.exists(temp_audio_path):
                     os.unlink(temp_audio_path)
 
-            ctx["filter_complex"] = filter_complex
         return ctx
 
 class ImageCacheStage(PipelineStage):
@@ -580,6 +704,12 @@ class ImageCacheStage(PipelineStage):
         if not images:
             return ctx
 
+        # Salva lista de imagens em arquivo para processamento batch
+        images_list_file = cache_dir / "images_list.txt"
+        with open(images_list_file, 'w', encoding='utf-8') as f:
+            for img_path in images:
+                f.write(f"{img_path}\n")
+
         # Processa cada imagem única
         cached_videos = {}
         processed_count = 0
@@ -609,7 +739,8 @@ class ImageCacheStage(PipelineStage):
                 fps,
                 width,
                 height,
-                encoder_config
+                encoder_config,
+                cache_dir
             )
 
             img_time = time.time() - img_start
@@ -625,8 +756,11 @@ class ImageCacheStage(PipelineStage):
         ctx["cached_images"] = cached_videos
         return ctx
 
-    def _prerender_image(self, img_path, output_path, duration, fps, width, height, encoder_config):
+    def _prerender_image(self, img_path, output_path, duration, fps, width, height, encoder_config, cache_dir):
         """Renderiza uma imagem em vídeo curto sem efeitos"""
+
+        # Salva comando em arquivo para reuso
+        cmd_file = cache_dir / f"cmd_{output_path.stem}.txt"
 
         # Pré-renderização simples sem efeitos - apenas escala e padding
         video_filter = (
@@ -667,6 +801,11 @@ class ImageCacheStage(PipelineStage):
 
         # Parâmetros finais
         cmd.extend(["-r", str(fps), "-an", str(output_path)])
+
+        # Salva comando no arquivo cache
+        with open(cmd_file, 'w', encoding='utf-8') as f:
+            f.write(" ".join([str(c) for c in cmd]))
+            f.write("\n")
 
         run(cmd)
 
@@ -758,19 +897,30 @@ class OutputStage(PipelineStage):
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         import time
+        import os
+        import glob
 
         print("Iniciando renderização final...")
         start_time = time.time()
 
         inputs = ctx["inputs"]
-        filter_complex = ctx["filter_complex"]
         map_out = ctx["map_out"]
         audio_idx = ctx["audio_idx"]
         out_path = ctx["out_path"]
         encoder_config = ctx.get("encoder_config", {})
+        use_filter_file = ctx.get("use_filter_complex_file", False)
 
         # Comando base
-        cmd = ["ffmpeg"] + inputs + ["-filter_complex", filter_complex, "-map", map_out, "-map", f"{audio_idx}:a"]
+        cmd = [get_ffmpeg_path()] + inputs
+
+        # Usa arquivo de filtro se disponível, senão filtro inline
+        if use_filter_file and ctx.get("filter_complex_file"):
+            cmd.extend(["-filter_complex_script", ctx["filter_complex_file"]])
+        else:
+            filter_complex = ctx.get("filter_complex", "")
+            cmd.extend(["-filter_complex", filter_complex])
+
+        cmd.extend(["-map", map_out, "-map", f"{audio_idx}:a"])
 
         # Configurações do encoder
         codec = encoder_config.get("codec", "libx264")
@@ -797,14 +947,31 @@ class OutputStage(PipelineStage):
         # Configurações de áudio e saída
         cmd.extend(["-c:a", "aac", "-b:a", "128k", str(out_path)])
 
-        # Log completo do comando
-        print("\nComando FFmpeg completo:")
-        cmd_str = " ".join([str(c) for c in cmd])
-        print(cmd_str)
-        print("\n")
+        try:
+            # Log do comando (sem mostrar filtro complexo se muito grande)
+            if use_filter_file:
+                print(f"\nUsando arquivo de filtro: {ctx['filter_complex_file']}")
 
-        # Executa o comando
-        run(cmd)
+            print("Executando renderização...")
+            run(cmd)
+
+        finally:
+            # Remove arquivo temporário de filtro se existir
+            if use_filter_file and ctx.get("filter_complex_file"):
+                filter_file = ctx["filter_complex_file"]
+                if os.path.exists(filter_file):
+                    os.unlink(filter_file)
+
+            # Remove arquivos de comando .txt da pasta cache
+            cache_dir = Path(out_path).parent / "cache"
+            if cache_dir.exists():
+                cmd_files = glob.glob(str(cache_dir / "cmd_*.txt"))
+                for cmd_file in cmd_files:
+                    try:
+                        os.unlink(cmd_file)
+                    except OSError:
+                        pass
+                print(f"Removidos {len(cmd_files)} arquivos de comando da cache")
 
         total_time = time.time() - start_time
         print(f"Renderização final concluída em {total_time:.1f}s")
