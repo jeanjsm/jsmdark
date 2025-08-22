@@ -65,6 +65,7 @@ def create_video_from_narration(
     resolution_preset: str = "horizontal_1080p",
     background_music: str = None,
     background_music_volume: float = 0.2,
+    subtitle_effect: str = "none",
 ):
     # Remove silêncio da narração se habilitado
     if remove_silence:
@@ -127,6 +128,7 @@ def create_video_from_narration(
         "resolution_preset": resolution_preset,
         "background_music": background_music,
         "background_music_volume": background_music_volume,
+        "subtitle_effect": subtitle_effect,
     }
     pipeline = MediaPipeline(stages)
     return pipeline.run(ctx)
@@ -203,10 +205,9 @@ if __name__ == "__main__":
     # Novos parâmetros para trilha de fundo
     parser.add_argument("--background_music", default=None, help="Arquivo de áudio para trilha de fundo (mp3, wav, etc.)")
     parser.add_argument("--background_music_volume", type=float, default=0.2, help="Volume da trilha de fundo (0.0 a 1.0)")
+    parser.add_argument("--subtitle_effect", choices=["none", "fade_in", "fill_bar"], default="none", help="Efeito na legenda: none, fade_in ou fill_bar")
 
     args = parser.parse_args()
-
-    chroma_list = json.loads(args.chroma_list) if args.chroma_list else None
     create_video_from_narration(
         narration_path=args.narracao,
         videos_folder=args.pasta_videos,
@@ -226,24 +227,24 @@ if __name__ == "__main__":
         logo_x=args.logo_x,
         logo_y=args.logo_y,
         logo_position=args.logo_position,
+        chroma=args.chroma,
+        chroma_scale=args.chroma_scale,
+        chroma_position=args.chroma_position,
+        chroma_start=args.chroma_start,
+        chroma_list=None,
+        transition_type=args.transition_type,
         enable_subtitles=args.enable_subtitles,
         subtitle_font_size=args.subtitle_font_size,
         subtitle_color=args.subtitle_color,
         subtitle_position=args.subtitle_position,
         subtitle_font=args.subtitle_font,
-        words_per_subtitle=args.words_per_subtitle,
-        vosk_model_path=args.vosk_model_path,
-        chroma=args.chroma,
-        chroma_scale=args.chroma_scale,
-        chroma_position=args.chroma_position,
-        chroma_start=args.chroma_start,
-        chroma_list=chroma_list,
-        transition_type=args.transition_type,
         subtitle_outline_color=args.subtitle_outline_color,
         subtitle_outline_width=args.subtitle_outline_width,
         subtitle_shadow_color=args.subtitle_shadow_color,
         subtitle_shadow_x=args.subtitle_shadow_x,
         subtitle_shadow_y=args.subtitle_shadow_y,
+        words_per_subtitle=args.words_per_subtitle,
+        vosk_model_path=args.vosk_model_path,
         enable_ken_burns=args.enable_ken_burns,
         cinematic_preset=args.cinematic_preset,
         custom_lut_path=args.custom_lut_path,
@@ -261,4 +262,5 @@ if __name__ == "__main__":
         resolution_preset=args.resolution_preset,
         background_music=args.background_music,
         background_music_volume=args.background_music_volume,
+        subtitle_effect=args.subtitle_effect,
     )

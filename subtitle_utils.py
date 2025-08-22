@@ -260,6 +260,7 @@ def generate_ass_file(
     playres_x: int = 1920,
     playres_y: int = 1080,
     margin_v: int = 40,
+    subtitle_effect: str = "none",
 ) -> None:
     """Gera arquivo ASS estilizado com encoding UTF-8 BOM para compatibilidade."""
     header = (
@@ -296,6 +297,8 @@ def generate_ass_file(
             # Escapa caracteres especiais para ASS
             text = text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
             text = text.replace("\n", r"\N")
+            if subtitle_effect == "fade_in":
+                text = "{\\fad(1000,0)}" + text
             f.write(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,0,0,0,,{text}\n")
 
 

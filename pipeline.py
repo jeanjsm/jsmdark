@@ -670,16 +670,45 @@ class SubtitleStage(PipelineStage):
                         color=color_ass,
                         alignment=alignment,
                         playres_x=ctx.get("width", 1920),
-                        playres_y=ctx.get("height", 1080)
+                        playres_y=ctx.get("height", 1080),
+                        subtitle_effect=ctx.get("subtitle_effect", "none")
                     )
 
                     # Aplica filtro subtitles no vídeo
                     # Escapa corretamente o caminho para Windows/FFmpeg
                     ass_path_escaped = str(Path(ass_file_path)).replace('\\', '\\\\').replace(':', '\\:')
-                    # Usa sintaxe correta do filtro subtitles
-                    subtitle_filter = f"subtitles=filename='{ass_path_escaped}'"
-                    filter_complex = f"{filter_complex};{map_out}{subtitle_filter}[vsubtitles]"
-                    ctx["map_out"] = "[vsubtitles]"
+                    subtitle_effect = ctx.get("subtitle_effect", "none")
+                    # Calcula y da barra conforme a posição da legenda
+                    subtitle_position = ctx.get("subtitle_position", "bottom_center")
+                    bar_h = 80
+                    margin_v = 40
+                    height = ctx.get("height", 1080)
+                    y_map = {
+                        "bottom_center": f"ih-{bar_h+margin_v}",
+                        "bottom_left": f"ih-{bar_h+margin_v}",
+                        "bottom_right": f"ih-{bar_h+margin_v}",
+                        "top_center": f"{margin_v}",
+                        "top_left": f"{margin_v}",
+                        "top_right": f"{margin_v}",
+                        "center": f"(ih-{bar_h})/2"
+                    }
+                    bar_y = y_map.get(subtitle_position, f"ih-{bar_h+margin_v}")
+                    if subtitle_effect == "fade_in":
+                        # Efeito de fade-in na legenda
+                        subtitle_filter = f"subtitles=filename='{ass_path_escaped}',fade=t=in:st=0:d=1"
+                        filter_complex = f"{filter_complex};{map_out}{subtitle_filter}[vsubtitles]"
+                        ctx["map_out"] = "[vsubtitles]"
+                    elif subtitle_effect == "fill_bar":
+                        # Barra atrás do texto, alinhada com a legenda
+                        bar_filter = f"drawbox=x=0:y={bar_y}:w='min(t*iw/2,iw)':h={bar_h}:color=yellow@0.95:t=fill"
+                        subtitle_filter = f"subtitles=filename='{ass_path_escaped}'"
+                        filter_complex = f"{filter_complex};{map_out}{bar_filter}[vbar];[vbar]{subtitle_filter}[vsubtitles]"
+                        ctx["map_out"] = "[vsubtitles]"
+                    else:
+                        # Sem efeito
+                        subtitle_filter = f"subtitles=filename='{ass_path_escaped}'"
+                        filter_complex = f"{filter_complex};{map_out}{subtitle_filter}[vsubtitles]"
+                        ctx["map_out"] = "[vsubtitles]"
                     ctx["subtitle_file"] = ass_file_path  # Salva para limpeza posterior
 
                     # Atualiza arquivo ou variável
