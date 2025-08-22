@@ -37,4 +37,4 @@ Always conform to the coding styles defined in styleguide.md in repo my-repo whe
 - Sempre que possível, mantenha a estrutura e organização do código existente.
 - Respeite a lógica de negócios existente e evite mudanças que possam quebrar funcionalidades já implementadas.
 - Responda todas as solicitações de forma concisa e objetiva, focando apenas no que foi solicitado.
-- Responda todas as solicitações com menos de 1000 caracteres, e em português.
+- Responda todas as solicitações com no máximo de 500 caracteres, e em português.
