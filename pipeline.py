@@ -118,20 +118,21 @@ class VideoBaseStage(PipelineStage):
         cached = ctx["cached_media"]
 
         # Monta inputs e concat file
-        inputs = ["-y","-hide_banner","-loglevel","error","-i",str(narration)]
-        with tempfile.NamedTemporaryFile(mode="w",suffix=".txt",delete=False) as f:
+        # ALTERAÇÃO: adicionar -fflags +genpts ANTES do primeiro -i para garantir PTS válidos
+        inputs = ["-y", "-hide_banner", "-loglevel", "error", "-fflags", "+genpts", "-i", str(narration)]
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             concat_file = f.name
             base = folder.resolve()
             for src, take in segments:
                 path = cached.get(src, src)
                 try:
                     rel = Path(path).resolve().relative_to(base)
-                    path = str(folder/rel).replace("\\","/")
+                    path = str(folder/rel).replace("\\", "/")
                 except ValueError:
-                    path = path.replace("\\","/")
+                    path = path.replace("\\", "/")
                 f.write(f"file '{path}'\n")
                 f.write(f"duration {take:.3f}\n")
-        inputs += ["-f","concat","-safe","0","-i",concat_file]
+        inputs += ["-f", "concat", "-safe", "0", "-i", concat_file]
         ctx["concat_file"] = concat_file
 
         # Trim + scale+pad
@@ -215,22 +216,12 @@ class TransitionStage(PipelineStage):
             fb.add_filter(f"[{prev}][{curr}]xfade=transition={ttype}:duration=1:offset={offset}[{out}]")
             prev, prev_dur = out, prev_dur + curr_dur - 1
 
-        # ===================================================================
-        # INÍCIO DA ALTERAÇÃO: Garante a duração exata do vídeo principal
-        # ===================================================================
-        # O código antigo usava 'tpad' que só adicionava tempo, mas não removia o excesso.
-        # Usando 'trim' garantimos que o fluxo de vídeo principal tenha exatamente
-        # a duração da narração, cortando o que sobrar. Isso abre espaço para o
-        # vídeo de encerramento ser concatenado corretamente.
-
+        # Garante a duração exata e formata o fluxo final
         final_video_out = "[vout]"
-        fb.add_filter(f"[{prev}]trim=duration={audio_dur}{final_video_out}")
+        fb.add_filter(f"[{prev}]trim=duration={audio_dur},format=yuv420p,setsar=1{final_video_out}")
 
         fb.set_output(final_video_out)
         ctx["map_out"] = final_video_out
-        # ===================================================================
-        # FIM DA ALTERAÇÃO
-        # ===================================================================
 
         return ctx
 
@@ -682,6 +673,10 @@ class ImageCacheStage(PipelineStage):
         codec = encoder_config.get("codec", "libx264")
         cmd.extend(["-c:v", codec])
 
+        # Força compatibilidade e GOP estável
+        gop = max(int(fps * 2), 2)
+        cmd += ["-pix_fmt", "yuv420p", "-g", str(gop), "-keyint_min", str(gop), "-sc_threshold", "0"]
+
         # Configurações específicas por codec
         if "nvenc" in codec:
             if "cq" in encoder_config:
@@ -760,6 +755,11 @@ class MediaCacheStage(PipelineStage):
                 # Codec e encoder_config
                 codec = encoder_config.get("codec", "libx264")
                 cmd += ["-c:v", codec]
+
+                # Força compat e GOP estável também no cache
+                gop = max(int(fps * 2), 2)
+                cmd += ["-pix_fmt", "yuv420p", "-g", str(gop), "-keyint_min", str(gop), "-sc_threshold", "0"]
+
                 # NVENC ou libx264 presets
                 if "nvenc" in codec:
                     if "cq" in encoder_config:
@@ -976,8 +976,18 @@ class OutputStage(PipelineStage):
         if "threads" in encoder_config:
             cmd += ["-threads", encoder_config["threads"]]
 
+        # ALTERAÇÕES: compatibilidade, seek e GOP estável
+        fps = ctx.get("fps", 30)
+        gop = max(int(fps * 2), 2)
+        cmd += [
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            "-avoid_negative_ts", "make_zero",
+            "-g", str(gop), "-keyint_min", str(gop), "-sc_threshold", "0"
+        ]
+
         # Configurações de áudio e saída
-        cmd += ["-c:a", "aac", "-b:a", "128k"]
+        cmd += ["-c:a", "aac", "-b:a", "128k", "-ar", "44100"]
         cmd += ["-t", str(audio_duration)]
         cmd += [str(out_path)]
 
