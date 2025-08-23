@@ -21,14 +21,24 @@ class FilterBuilder:
         self.current_output = None
         self.video_duration = 0
         self.audio_duration = 0
+        self.used_labels = set()
 
     def add_filter(self, filter_str: str):
         """Adiciona um filtro à cadeia"""
         self.filters.append(filter_str)
 
     def set_output(self, output_label: str):
-        """Define o label de saída atual"""
+        """Define label único e registra uso"""
+        if output_label in self.used_labels:
+            base_label = output_label.strip('[]')
+            counter = 1
+            while f"[{base_label}_{counter}]" in self.used_labels:
+                counter += 1
+            output_label = f"[{base_label}_{counter}]"
+
         self.current_output = output_label
+        self.used_labels.add(output_label)
+        return output_label
 
     def get_filter_complex(self) -> str:
         """Retorna o filter_complex completo"""
@@ -54,9 +64,10 @@ class PipelineStage(ABC):
 
 
 class VideoBaseStage(PipelineStage):
-    """Estágio base corrigido com eliminação de duplicação de filtros"""
+    """Estágio base: seleciona segmentos, chama cache e gera concat + trim/scale+pad."""
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        # Contexto
         narration_path = ctx["narration_path"]
         videos_folder = ctx["videos_folder"]
         seed = ctx["seed"]
@@ -66,176 +77,88 @@ class VideoBaseStage(PipelineStage):
         video_mode = ctx["video_mode"]
         image_segment_duration = ctx["image_segment_duration"]
 
+        # Validação
         narration = Path(narration_path)
         folder = Path(videos_folder)
-
         if not narration.exists():
             raise FileNotFoundError(f"Narração não encontrada: {narration}")
-        if not folder.exists() or not folder.is_dir():
-            raise FileNotFoundError(f"Pasta de entrada não encontrada ou inválida: {folder}")
+        if not folder.is_dir():
+            raise FileNotFoundError(f"Pasta inválida: {folder}")
 
+        # Duração do áudio
         audio_dur = duration_seconds(narration)
         ctx["audio_duration"] = audio_dur
 
-        # Adiciona margem de segurança para garantir cobertura total
-        safety_margin = 2.0  # 2 segundos extras
-
-        # Inicializa o FilterBuilder
-        filter_builder = FilterBuilder()
-        filter_builder.audio_duration = audio_dur
-
-        inputs = ["-y", "-hide_banner", "-loglevel", "error", "-i", str(narration)]
-        segments = []
-
-        # Calcula duração extra necessária para compensar transições
-        transition_type = ctx.get("transition_type", "none")
-        extra_duration_needed = 0
-
+        # Seleção de segmentos
+        safety_margin = 2.0
+        transition = ctx.get("transition_type", "none")
         if video_mode == "videos":
             vids = list_videos(folder)
             if not vids:
-                raise FileNotFoundError(f"Nenhum vídeo com extensões suportadas em: {folder}")
-
-            # Se houver transições, adiciona tempo extra
-            if transition_type != "none":
-                num_transitions = len(vids) - 1 if len(vids) > 1 else 0
-                extra_duration_needed = num_transitions * 1.5  # Mais conservador
-            else:
-                extra_duration_needed = 0
-
-            # Pega segmentos com duração extra
-            total_duration_needed = audio_dur + extra_duration_needed + safety_margin
-            segments = pick_segments_to_cover(total_duration_needed, vids, seed=seed)
-
-            # Verifica se a duração total dos segmentos é suficiente
-            total_segments_duration = sum(take for _, take in segments)
-            if total_segments_duration < audio_dur:
-                # Extende o último segmento se necessário
-                if segments:
-                    last_video, last_take = segments[-1]
-                    needed_extension = audio_dur - total_segments_duration + safety_margin
-                    segments[-1] = (last_video, last_take + needed_extension)
-
-            # Criar arquivo temporário com lista de inputs para FFmpeg
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                temp_file = f.name
-
-                # Define a pasta base para usar caminhos relativos
-                base_folder = Path(folder).resolve()
-
-                for v, take in segments:
-                    # Para vídeos - usa caminho relativo quando possível
-                    try:
-                        rel_path = Path(v).resolve().relative_to(base_folder)
-                        video_path = str(Path(folder) / rel_path).replace('\\', '/')
-                    except ValueError:
-                        # Se não conseguir obter caminho relativo, usa absoluto com escape
-                        video_path = str(v).replace('\\', '/')
-
-                    f.write(f"file '{video_path}'\n")
-                    f.write(f"duration {take:.3f}\n")
-
-            # Usar o arquivo de concatenação
-            ctx["concat_file"] = temp_file
-
-            # Adiciona input do concat file
-            if segments:
-                inputs += ["-f", "concat", "-safe", "0", "-i", temp_file]
-
-        elif video_mode == "images":
-            images = list_images(folder)
-            if not images:
-                raise FileNotFoundError(f"Nenhuma imagem com extensões suportadas em: {folder}")
-
-            # Se houver transições, adiciona tempo extra
-            if transition_type != "none":
-                num_transitions = (audio_dur / image_segment_duration) - 1
-                num_transitions = max(0, int(num_transitions))
-                extra_duration_needed = num_transitions * 1.5
-            else:
-                extra_duration_needed = 0
-
-            total_duration_needed = audio_dur + extra_duration_needed + safety_margin
-            segments = pick_image_segments_to_cover(
-                total_duration_needed,
-                images,
-                image_segment_duration,
-                seed=seed
-            )
-
-            cached_images = ctx.get("cached_images", {})
-            ken_burns_enabled = ctx.get("enable_ken_burns", False)
-
-            # Criar arquivo temporário com lista de inputs para FFmpeg
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                temp_file = f.name
-
-                # Define a pasta base para usar caminhos relativos
-                base_folder = Path(folder).resolve()
-
-                for img, take in segments:
-                    if str(img) in cached_images:
-                        # Para imagens em cache (vídeos pré-processados)
-                        cache_path = cached_images[str(img)].replace('\\', '/')
-                        f.write(f"file '{cache_path}'\n")
-                        f.write(f"duration {take:.3f}\n")
-                    else:
-                        # Para imagens estáticas - usa caminho relativo quando possível
-                        try:
-                            rel_path = Path(img).resolve().relative_to(base_folder)
-                            img_path = str(Path(folder) / rel_path).replace('\\', '/')
-                        except ValueError:
-                            # Se não conseguir obter caminho relativo, usa absoluto com escape
-                            img_path = str(img).replace('\\', '/')
-
-                        f.write(f"file '{img_path}'\n")
-                        f.write(f"duration {take:.3f}\n")
-
-            # Usar o arquivo de concatenação
-            ctx["concat_file"] = temp_file
-
-            # Adiciona input do concat file
-            if segments:
-                inputs += ["-f", "concat", "-safe", "0", "-i", temp_file]
-
-            # REMOVIDO: A lógica antiga que criava filtros individuais para cada imagem
-            # Isso estava causando conflito com o concat file
-
+                raise FileNotFoundError(f"Nenhum vídeo em: {folder}")
+            extra = (len(vids)-1)*1.5 if transition!="none" and len(vids)>1 else 0
+            total = audio_dur + extra + safety_margin
+            segments = pick_segments_to_cover(total, vids, seed=seed)
         else:
-            raise ValueError(f"Modo de vídeo inválido: {video_mode}. Use 'videos' ou 'images'.")
+            imgs = list_images(folder)
+            if not imgs:
+                raise FileNotFoundError(f"Nenhuma imagem em: {folder}")
+            extra = max(0, int(audio_dur/image_segment_duration)-1)*1.5 if transition!="none" else 0
+            total = audio_dur + extra + safety_margin
+            segments = pick_image_segments_to_cover(total, imgs, image_segment_duration, seed=seed)
 
-        # CORREÇÃO PRINCIPAL: Lógica unificada para concat file
-        if "concat_file" in ctx:
-            # Com arquivo de concat, temos apenas um stream de entrada (1:v)
-            # Precisamos separar os segmentos via filtros de trim baseados em tempo
-            segment_labels = []
-            current_time = 0.0
-            video_input_idx = 1  # Índice do concat file (sempre 1)
-
-            for idx, (_, take) in enumerate(segments, start=1):
-                in_label = f"{video_input_idx}:v"  # Sempre [1:v] pois é concat file
-                out_label = f"v{idx}"
-                segment_labels.append(out_label)
-
-                # Corta o segmento na posição temporal atual
-                trim_filter = (
-                    f"[{in_label}]trim=start={current_time}:end={current_time + take},"
-                    f"setpts=PTS-STARTPTS[{out_label}]"
-                )
-                filter_builder.add_filter(trim_filter)
-                current_time += take
-        else:
-            # Modo antigo para compatibilidade (não deve ser usado com a nova arquitetura)
-            segment_labels = [f"v{i}" for i in range(1, len(segments) + 1)]
-
-        ctx["filter_builder"] = filter_builder
-        ctx["inputs"] = inputs
+        # Filtra segmentos curtos
+        segments = [s for s in segments if s[1] > 0.01]
+        if not segments:
+            raise ValueError("Todos os segmentos são muito curtos")
         ctx["segments"] = segments
-        ctx["segment_labels"] = segment_labels
-        ctx["video_input_idx"] = 1  # Armazena índice do input de vídeo para uso nos outros estágios
-        ctx["audio_idx"] = 0
 
+        # Gera cache para imagens ou vídeos
+        ctx = MediaCacheStage()(ctx)
+        cached = ctx["cached_media"]
+
+        # Monta inputs e concat file
+        inputs = ["-y","-hide_banner","-loglevel","error","-i",str(narration)]
+        with tempfile.NamedTemporaryFile(mode="w",suffix=".txt",delete=False) as f:
+            concat_file = f.name
+            base = folder.resolve()
+            for src, take in segments:
+                path = cached.get(src, src)
+                try:
+                    rel = Path(path).resolve().relative_to(base)
+                    path = str(folder/rel).replace("\\","/")
+                except ValueError:
+                    path = path.replace("\\","/")
+                f.write(f"file '{path}'\n")
+                f.write(f"duration {take:.3f}\n")
+        inputs += ["-f","concat","-safe","0","-i",concat_file]
+        ctx["concat_file"] = concat_file
+
+        # Trim + scale+pad
+        fb = FilterBuilder()
+        fb.audio_duration = audio_dur
+        labels = []
+        t = 0.0
+        for i, (_, take) in enumerate(segments, start=1):
+            in_lbl, out_lbl, seg_lbl = "1:v", f"v{i}", f"v{i}s"
+            labels.append(seg_lbl)
+            fb.add_filter(f"[{in_lbl}]trim=start={t:.3f}:end={t+take:.3f},setpts=PTS-STARTPTS[{out_lbl}]")
+            fb.add_filter(
+                f"[{out_lbl}]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2[{seg_lbl}]"
+            )
+            t += take
+
+        # Atualiza contexto
+        ctx.update({
+            "inputs": inputs,
+            "filter_builder": fb,
+            "segment_labels": labels,
+            "video_input_idx": 1,
+            "audio_idx": 0
+        })
         return ctx
+
 
 
 class TransitionStage(PipelineStage):
@@ -262,71 +185,44 @@ class TransitionStage(PipelineStage):
     ]
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
-        transition_type = ctx.get("transition_type", "none")
-        filter_builder = ctx["filter_builder"]
-        segments = ctx.get("segments", [])
-        segment_labels = ctx.get("segment_labels", [])
-        audio_duration = ctx["audio_duration"]
+        transition = ctx.get("transition_type", "none")
+        fb = ctx["filter_builder"]
+        labels = ctx["segment_labels"]
+        audio_dur = ctx["audio_duration"]
         fps = ctx.get("fps", 30)
 
-        if transition_type == "none" or len(segments) < 2:
-            # Sem transições - apenas concatena
-            concat_labels = "".join(f"[{label}]" for label in segment_labels)
-            concat_filter = f"{concat_labels}concat=n={len(segments)}:v=1:a=0[vout]"
-            filter_builder.add_filter(concat_filter)
-            filter_builder.set_output("[vout]")
+        # Se só um segmento ou sem transição
+        if transition == "none" or len(labels) < 2:
+            concat_lbls = "".join(f"[{l}]" for l in labels)
+            fb.add_filter(f"{concat_lbls}concat=n={len(labels)}:v=1:a=0[vout]")
+            fb.set_output("[vout]")
+            ctx["map_out"] = "[vout]"
+            return ctx
+
+        # Prepara uniformização
+        clean = []
+        for idx, l in enumerate(labels, start=1):
+            cl = f"vc{idx}"
+            fb.add_filter(f"[{l}]settb=AVTB,fps={fps},format=yuv420p[{cl}]")
+            clean.append(cl)
+
+        prev, prev_dur = clean[0], ctx["segments"][0][1]
+        for i in range(1, len(clean)):
+            ttype = transition if transition != "random" else random.choice(self.SUPPORTED_TRANSITIONS)
+            curr, curr_dur = clean[i], ctx["segments"][i][1]
+            offset = max(prev_dur - 1, 0)
+            out = f"trans{i}"
+            fb.add_filter(f"[{prev}][{curr}]xfade=transition={ttype}:duration=1:offset={offset}[{out}]")
+            prev, prev_dur = out, prev_dur + curr_dur - 1
+
+        # Ajusta duração final
+        if prev_dur < audio_dur:
+            pad = audio_dur - prev_dur
+            fb.add_filter(f"[{prev}]tpad=stop_duration={pad}[vout]")
         else:
-            # Prepara filtros de configuração uniforme
-            prep_filters = []
-            clean_labels = []
-            for i, label in enumerate(segment_labels):
-                dst = f"vc{i + 1}"
-                prep_filter = f"[{label}]settb=AVTB,fps={fps},format=yuv420p[{dst}]"
-                filter_builder.add_filter(prep_filter)
-                clean_labels.append(dst)
+            fb.add_filter(f"[{prev}]null[vout]")
 
-            # Com transições
-            transition_opts = [t for t in self.SUPPORTED_TRANSITIONS if t != "fade"]
-
-            prev_label = clean_labels[0]
-            prev_dur = segments[0][1]
-
-            for i in range(1, len(clean_labels)):
-                if transition_type == "random":
-                    ttype = random.choice(transition_opts)
-                else:
-                    ttype = transition_type if transition_type in self.SUPPORTED_TRANSITIONS else "fade"
-
-                curr_label = clean_labels[i]
-                curr_dur = segments[i][1]
-
-                # Offset correto para garantir cobertura total
-                offset = max(prev_dur - 1, 0)
-
-                out_label = f"trans{i}"
-                trans_filter = (
-                    f"[{prev_label}][{curr_label}]xfade=transition={ttype}:"
-                    f"duration=1:offset={offset}[{out_label}]"
-                )
-                filter_builder.add_filter(trans_filter)
-
-                prev_label = out_label
-                prev_dur = prev_dur + curr_dur - 1  # Ajusta duração considerando sobreposição
-
-            # Garante que o vídeo cubra toda a duração do áudio
-            final_label = prev_label
-            if prev_dur < audio_duration:
-                # Adiciona padding para cobrir duração restante
-                pad_duration = max(audio_duration - prev_dur, 0.1)
-                pad_filter = f"[{final_label}]tpad=stop_duration={pad_duration}[vout]"
-                filter_builder.add_filter(pad_filter)
-                filter_builder.set_output("[vout]")
-            else:
-                # Renomeia para vout
-                rename_filter = f"[{final_label}]null[vout]"
-                filter_builder.add_filter(rename_filter)
-                filter_builder.set_output("[vout]")
-
+        fb.set_output("[vout]")
         ctx["map_out"] = "[vout]"
         return ctx
 
@@ -806,6 +702,89 @@ class ImageCacheStage(PipelineStage):
 
         run(cmd)
 
+class MediaCacheStage(PipelineStage):
+    """Pré-renderiza imagens e vídeos em cache para resolução uniforme."""
+
+    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        mode = ctx.get("video_mode")
+        segments = ctx.get("segments", [])
+        if not segments:
+            return ctx
+
+        cache_dir = Path(ctx["out_path"]).parent / "cache"
+        cache_dir.mkdir(exist_ok=True)
+
+        width, height = ctx["width"], ctx["height"]
+        fps = ctx["fps"]
+        duration_img = ctx.get("image_segment_duration", 0)
+        encoder_config = ctx.get("encoder_config", {})
+
+        cached = {}
+        for src, _ in segments:
+            stem = Path(src).stem
+            out = cache_dir / f"{stem}_{width}x{height}.mp4"
+            cmd_file = cache_dir / f"cmd_{stem}_{width}x{height}.txt"
+
+            # Se ainda não existe, gera o vídeo escalado
+            if not out.exists():
+                # Monta o filtro de vídeo (scale+pad)
+                vf = (f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                      f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+                      f"setsar=1")
+
+                # Base do comando
+                if mode == "images":
+                    cmd = [
+                        get_ffmpeg_path(), "-y", "-hide_banner", "-loglevel", "error",
+                        "-loop", "1", "-t", f"{duration_img:.3f}", "-i", str(src),
+                        "-vf", vf
+                    ]
+                else:  # vídeos
+                    cmd = [
+                        get_ffmpeg_path(), "-y", "-hide_banner", "-loglevel", "error",
+                        "-i", str(src),
+                        "-vf", vf
+                    ]
+
+                # Framerate
+                cmd += ["-r", str(fps)]
+
+                # Codec e encoder_config
+                codec = encoder_config.get("codec", "libx264")
+                cmd += ["-c:v", codec]
+                # NVENC ou libx264 presets
+                if "nvenc" in codec:
+                    if "cq" in encoder_config:
+                        cmd += ["-cq", encoder_config["cq"]]
+                    if "preset" in encoder_config:
+                        cmd += ["-preset", encoder_config["preset"]]
+                    if "tune" in encoder_config:
+                        cmd += ["-tune", encoder_config["tune"]]
+                else:
+                    if "preset" in encoder_config:
+                        cmd += ["-preset", encoder_config["preset"]]
+                    if "crf" in encoder_config:
+                        cmd += ["-crf", encoder_config["crf"]]
+
+                # Threads
+                if "threads" in encoder_config:
+                    cmd += ["-threads", encoder_config["threads"]]
+
+                # Saída
+                cmd += [str(out)]
+
+                # Salva o comando num arquivo de texto
+                with open(cmd_file, "w", encoding="utf-8") as f:
+                    f.write(" ".join(cmd) + "\n")
+
+                # Executa o FFmpeg
+                run(cmd)
+
+            cached[src] = str(out)
+
+        ctx["cached_media"] = cached
+        return ctx
+
 
 class EncoderStage(PipelineStage):
     """Configura encoder, resolução e parâmetros de qualidade"""
@@ -937,88 +916,133 @@ class OutputStage(PipelineStage):
         encoder_config = ctx.get("encoder_config", {})
         audio_duration = ctx["audio_duration"]
 
-        # Processamento de áudio com música de fundo
+        # Determina o mapeamento de áudio correto
+        if audio_idx == "aout":
+            audio_map = "[aout]"
+        elif audio_idx == "afinal_ending":
+            audio_map = "[afinal_ending]"
+        else:
+            audio_map = f"[{audio_idx}:a]"
+
+        # Processamento de áudio com música de fundo, se houver
         background_music_idx = ctx.get("background_music_idx")
         background_music_volume = ctx.get("background_music_volume", 0.2)
 
         if background_music_idx is not None:
-            # Adiciona filtro de áudio ao FilterBuilder
+            main_audio_ref = audio_map
+            out_audio_label = "[aout_bg]"
             audio_filter = (
                 f"[{background_music_idx}:a]aloop=loop=-1:size=2e+09,"
                 f"volume={background_music_volume}[bg];"
-                f"[{audio_idx}:a][bg]amix=inputs=2:duration=first:"
-                f"dropout_transition=2[aout]"
+                f"{main_audio_ref}[bg]amix=inputs=2:duration=first:"
+                f"dropout_transition=2{out_audio_label}"
             )
             filter_builder.add_filter(audio_filter)
-            audio_map = "[aout]"
-        else:
-            audio_map = f"{audio_idx}:a"
+            audio_map = out_audio_label
 
-        # Salva filter_complex em arquivo
+        # Salva filter_complex em arquivo temporário
         filter_file = filter_builder.save_to_file()
         print(f"Filter complex salvo em: {filter_file}")
 
-        # Comando base
+        # Monta comando FFmpeg
         cmd = [get_ffmpeg_path()] + inputs
-        cmd.extend(["-filter_complex_script", filter_file])
-        cmd.extend(["-map", map_out])
-        cmd.extend(["-map", audio_map])
+        cmd += ["-filter_complex_script", filter_file]
+        cmd += ["-map", map_out]
+        cmd += ["-map", audio_map]
 
-        # Configurações do encoder
+        # Configurações de vídeo
         codec = encoder_config.get("codec", "libx264")
-        cmd.extend(["-c:v", codec])
-
+        cmd += ["-c:v", codec]
         if "nvenc" in codec:
             if "cq" in encoder_config:
-                cmd.extend(["-cq", encoder_config["cq"]])
+                cmd += ["-cq", encoder_config["cq"]]
             if "preset" in encoder_config:
-                cmd.extend(["-preset", encoder_config["preset"]])
+                cmd += ["-preset", encoder_config["preset"]]
             if "tune" in encoder_config:
-                cmd.extend(["-tune", encoder_config["tune"]])
+                cmd += ["-tune", encoder_config["tune"]]
         else:
             if "preset" in encoder_config:
-                cmd.extend(["-preset", encoder_config["preset"]])
+                cmd += ["-preset", encoder_config["preset"]]
             if "crf" in encoder_config:
-                cmd.extend(["-crf", encoder_config["crf"]])
-
+                cmd += ["-crf", encoder_config["crf"]]
         if "threads" in encoder_config:
-            cmd.extend(["-threads", encoder_config["threads"]])
+            cmd += ["-threads", encoder_config["threads"]]
 
         # Configurações de áudio e saída
-        cmd.extend(["-c:a", "aac", "-b:a", "128k"])
-        # Garante duração exata do vídeo
-        cmd.extend(["-t", str(audio_duration)])
-        cmd.extend([str(out_path)])
+        cmd += ["-c:a", "aac", "-b:a", "128k"]
+        cmd += ["-t", str(audio_duration)]
+        cmd += [str(out_path)]
 
+        # Executa renderização
         try:
             print("Executando renderização...")
             run(cmd)
         finally:
-            # Limpa arquivo temporário
+            # Limpeza de arquivos temporários
             if os.path.exists(filter_file):
                 os.unlink(filter_file)
                 print(f"Arquivo de filtro removido: {filter_file}")
-
-            # Remove arquivo ASS se existir
             if ctx.get("subtitle_file") and os.path.exists(ctx["subtitle_file"]):
                 os.unlink(ctx["subtitle_file"])
-
-            # Remove arquivos de comando .txt da pasta cache
             cache_dir = Path(out_path).parent / "cache"
             if cache_dir.exists():
-                cmd_files = glob.glob(str(cache_dir / "cmd_*.txt"))
-                for cmd_file in cmd_files:
+                for cmd_file in glob.glob(str(cache_dir / "cmd_*.txt")):
                     try:
                         os.unlink(cmd_file)
                     except OSError:
                         pass
-                if cmd_files:
-                    print(f"Removidos {len(cmd_files)} arquivos de comando da cache")
 
         total_time = time.time() - start_time
         print(f"Renderização final concluída em {total_time:.1f}s")
-
         ctx["render_time"] = total_time
+
+        return ctx
+
+
+class EndingStage(PipelineStage):
+    """Adiciona vídeo de encerramento ao final, com áudio próprio, sem overlay."""
+    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        ending_video_path = ctx.get("ending_video_path")
+        if not ending_video_path:
+            return ctx
+
+        # Gera cache do vídeo de encerramento com a resolução correta
+        ending_segments = [(ending_video_path, duration_seconds(ending_video_path))]
+        cache_ctx = ctx.copy()
+        cache_ctx["segments"] = ending_segments
+        cache_ctx["video_mode"] = "videos"
+        cached_ctx = MediaCacheStage()(cache_ctx)
+        cached_ending = cached_ctx["cached_media"].get(ending_video_path, ending_video_path)
+
+        filter_builder = ctx["filter_builder"]
+        inputs = ctx["inputs"]
+        map_out = ctx["map_out"]
+        audio_idx = ctx["audio_idx"]
+
+        # Calcula índice correto do próximo input baseado em quantos "-i" já existem
+        ending_idx = sum(1 for x in inputs if x == "-i")
+        inputs.extend(["-i", str(cached_ending)])
+
+        # Duração do encerramento
+        ending_duration = duration_seconds(ending_video_path)
+
+        # Labels de vídeo e áudio
+        main_video_ref = map_out                             # ex: "[vsubtitles]" ou "[vfinal]"
+        ending_video_ref = f"[{ending_idx}:v]"               # usa index correto
+        ending_audio_ref = f"[{ending_idx}:a]"
+
+        # Concatena vídeo principal + encerramento em labels únicos
+        video_concat = f"{main_video_ref}{ending_video_ref}concat=n=2:v=1:a=0[vfinal_ending]"
+        audio_concat = f"[{audio_idx}:a]{ending_audio_ref}concat=n=2:v=0:a=1[afinal_ending]"
+
+        filter_builder.add_filter(video_concat)
+        filter_builder.add_filter(audio_concat)
+
+        # Atualiza contexto para os próximos estágios
+        ctx["map_out"] = "[vfinal_ending]"
+        ctx["audio_idx"] = "afinal_ending"
+        ctx["audio_duration"] += ending_duration
+
         return ctx
 
 

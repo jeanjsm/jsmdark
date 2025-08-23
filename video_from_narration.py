@@ -6,7 +6,9 @@ from typing import Callable, Dict, Any, List as TList
 from audio_utils import duration_seconds
 from video_utils import list_videos, pick_segments_to_cover, list_images, pick_image_segments_to_cover
 from ffmpeg_utils import run
-from pipeline import MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage, TransitionStage, SubtitleStage, CinematicStage, ImageCacheStage, EncoderStage, OutputStage, BackgroundMusicStage
+from pipeline import MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage, TransitionStage, \
+    SubtitleStage, CinematicStage, ImageCacheStage, EncoderStage, OutputStage, BackgroundMusicStage, EndingStage, \
+    MediaCacheStage
 import json
 import argparse
 
@@ -66,6 +68,7 @@ def create_video_from_narration(
     background_music: str = None,
     background_music_volume: float = 0.2,
     subtitle_effect: str = "none",
+    ending_video_path: str = None,
 ):
     # Remove silêncio da narração se habilitado
     if remove_silence:
@@ -76,7 +79,7 @@ def create_video_from_narration(
             stop_duration=silence_duration
         )
 
-    stages = [EncoderStage(), ImageCacheStage(), VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), CinematicStage(), SubtitleStage(), BackgroundMusicStage(), OutputStage()]
+    stages = [EncoderStage(), ImageCacheStage(), MediaCacheStage(), VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), CinematicStage(), SubtitleStage(), BackgroundMusicStage(), EndingStage(), OutputStage()]
     ctx = {
         "narration_path": narration_path,
         "videos_folder": videos_folder,
@@ -129,6 +132,7 @@ def create_video_from_narration(
         "background_music": background_music,
         "background_music_volume": background_music_volume,
         "subtitle_effect": subtitle_effect,
+        "ending_video_path": ending_video_path,
     }
     pipeline = MediaPipeline(stages)
     return pipeline.run(ctx)
@@ -263,4 +267,5 @@ if __name__ == "__main__":
         background_music=args.background_music,
         background_music_volume=args.background_music_volume,
         subtitle_effect=args.subtitle_effect,
+        ending_video_path=args.ending_video_path,
     )

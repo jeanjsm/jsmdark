@@ -177,6 +177,16 @@ class VideoGeneratorGUI(QMainWindow):
 
         layout.addRow("", silence_group)
 
+        # Encerramento (opcional)
+        self.ending_layout = QHBoxLayout()
+        self.ending_input = QLineEdit()
+        self.ending_input.setPlaceholderText("Selecione o vídeo de encerramento (opcional)")
+        self.ending_button = QPushButton("Procurar")
+        self.ending_button.clicked.connect(lambda: self.browse_file(self.ending_input, "Vídeo (*.mp4 *.mov *.avi)"))
+        self.ending_layout.addWidget(self.ending_input)
+        self.ending_layout.addWidget(self.ending_button)
+        layout.addRow("Vídeo de encerramento:", self.ending_layout)
+
     def setup_video_tab(self, tab):
         layout = QFormLayout(tab)
 
@@ -676,7 +686,8 @@ class VideoGeneratorGUI(QMainWindow):
             'resolution_preset': self.resolution_preset.currentText(),
             'background_music': self.bg_music_input.text() if self.bg_music_input.text() else None,
             'background_music_volume': self.bg_music_volume.value(),
-            'subtitle_effect': self.subtitle_effect.currentText()
+            'subtitle_effect': self.subtitle_effect.currentText(),
+            'ending_video_path': self.ending_input.text() if self.ending_input.text() else None,
         }
 
         # Adiciona lista de chromas
@@ -772,7 +783,8 @@ class VideoGeneratorGUI(QMainWindow):
             'resolution_preset': self.resolution_preset.currentText(),
             'background_music': self.bg_music_input.text() if self.bg_music_input.text() else None,
             'background_music_volume': self.bg_music_volume.value(),
-            'subtitle_effect': self.subtitle_effect.currentText()
+            'subtitle_effect': self.subtitle_effect.currentText(),
+            'ending_video_path': self.ending_input.text() if self.ending_input.text() else None,
         }
 
         # Adiciona lista de chromas
@@ -937,7 +949,7 @@ class VideoGeneratorGUI(QMainWindow):
         self.bg_music_input.textChanged.connect(self.save_config)
         self.bg_music_volume.valueChanged.connect(self.save_config)
         self.subtitle_effect.currentTextChanged.connect(self.save_config)
-
+        self.ending_input.textChanged.connect(self.save_config)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
