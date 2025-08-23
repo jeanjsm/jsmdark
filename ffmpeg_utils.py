@@ -22,7 +22,7 @@ def run(cmd: List[str]) -> subprocess.CompletedProcess:
             cmd[0] = get_ffmpeg_path()
 
         # Debug: mostra o comando que será executado
-        print(f"[DEBUG] Executando comando: {cmd[0]} {' '.join(cmd[1:5])}...")
+        print(f"[DEBUG] Executando comando: {cmd[0]} {' '.join(cmd[1:])}")
 
         # Verifica se há filter_complex muito longo
         filter_complex_idx = None

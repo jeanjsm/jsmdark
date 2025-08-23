@@ -1,20 +1,61 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, Any, List as TList
+from typing import Dict, Any, List as TList, Optional
 from audio_utils import duration_seconds
-from subtitle_utils import group_words_by_count
+from subtitle_utils import group_words_by_count, extract_audio_for_transcription, transcribe_audio, generate_ass_file
 from video_utils import list_videos, pick_segments_to_cover, list_images, pick_image_segments_to_cover
 import random
 import hashlib
 import time
+import tempfile
+import os
+import glob
 from ffmpeg_utils import run, get_ffmpeg_path
+
+
+class FilterBuilder:
+    """Centralizador de construção de filtros complexos do FFmpeg"""
+
+    def __init__(self):
+        self.filters = []
+        self.current_output = None
+        self.video_duration = 0
+        self.audio_duration = 0
+
+    def add_filter(self, filter_str: str):
+        """Adiciona um filtro à cadeia"""
+        self.filters.append(filter_str)
+
+    def set_output(self, output_label: str):
+        """Define o label de saída atual"""
+        self.current_output = output_label
+
+    def get_filter_complex(self) -> str:
+        """Retorna o filter_complex completo"""
+        return ";".join(self.filters) if self.filters else ""
+
+    def save_to_file(self) -> str:
+        """Salva o filter_complex em arquivo temporário e retorna o caminho"""
+        filter_complex = self.get_filter_complex()
+        with tempfile.NamedTemporaryFile(mode='w', suffix='_filter.txt', delete=False) as f:
+            f.write(filter_complex)
+            return f.name
+
+    def clear(self):
+        """Limpa todos os filtros"""
+        self.filters = []
+        self.current_output = None
+
 
 class PipelineStage(ABC):
     @abstractmethod
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         pass
 
+
 class VideoBaseStage(PipelineStage):
+    """Estágio base corrigido com eliminação de duplicação de filtros"""
+
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         narration_path = ctx["narration_path"]
         videos_folder = ctx["videos_folder"]
@@ -22,338 +63,184 @@ class VideoBaseStage(PipelineStage):
         fps = ctx["fps"]
         width = ctx["width"]
         height = ctx["height"]
-        crf = ctx["crf"]
-        preset = ctx["preset"]
         video_mode = ctx["video_mode"]
         image_segment_duration = ctx["image_segment_duration"]
-        out_path = ctx["out_path"]
+
         narration = Path(narration_path)
         folder = Path(videos_folder)
-        out = Path(out_path)
+
         if not narration.exists():
             raise FileNotFoundError(f"Narração não encontrada: {narration}")
         if not folder.exists() or not folder.is_dir():
             raise FileNotFoundError(f"Pasta de entrada não encontrada ou inválida: {folder}")
+
         audio_dur = duration_seconds(narration)
-        ffmpeg_bin = get_ffmpeg_path()
+        ctx["audio_duration"] = audio_dur
+
+        # Adiciona margem de segurança para garantir cobertura total
+        safety_margin = 2.0  # 2 segundos extras
+
+        # Inicializa o FilterBuilder
+        filter_builder = FilterBuilder()
+        filter_builder.audio_duration = audio_dur
+
         inputs = ["-y", "-hide_banner", "-loglevel", "error", "-i", str(narration)]
-        vf_parts = []
-        vlabels = []
         segments = []
+
+        # Calcula duração extra necessária para compensar transições
+        transition_type = ctx.get("transition_type", "none")
+        extra_duration_needed = 0
+
         if video_mode == "videos":
             vids = list_videos(folder)
             if not vids:
                 raise FileNotFoundError(f"Nenhum vídeo com extensões suportadas em: {folder}")
-            segments = pick_segments_to_cover(audio_dur, vids, seed=seed)
-            if len(segments) != len([v for v, _ in segments]):
-                raise ValueError(f"Número de segmentos ({len(segments)}) difere do número de vídeos selecionados ({len([v for v, _ in segments])})")
-            for v, _ in segments:
-                inputs += ["-i", str(v)]
-            for idx, (_, take) in enumerate(segments, start=1):
-                label_in = f"{idx}:v"
-                take_str = f"{take:.3f}"
-                vout = f"v{idx}"
-                chain = (
-                    f"[{label_in}]"
-                    f"fps={fps},"
-                    f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease,"
-                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-                    f"setsar=1,"
-                    f"trim=0:{take_str},setpts=PTS-STARTPTS"
-                    f"[{vout}]"
-                )
-                vf_parts.append(chain)
-                vlabels.append(f"[{vout}]")
-            concat = "".join(vlabels) + f"concat=n={len(segments)}:v=1:a=0[vout]"
-            filter_complex = ";".join(vf_parts + [concat])
+
+            # Se houver transições, adiciona tempo extra
+            if transition_type != "none":
+                num_transitions = len(vids) - 1 if len(vids) > 1 else 0
+                extra_duration_needed = num_transitions * 1.5  # Mais conservador
+            else:
+                extra_duration_needed = 0
+
+            # Pega segmentos com duração extra
+            total_duration_needed = audio_dur + extra_duration_needed + safety_margin
+            segments = pick_segments_to_cover(total_duration_needed, vids, seed=seed)
+
+            # Verifica se a duração total dos segmentos é suficiente
+            total_segments_duration = sum(take for _, take in segments)
+            if total_segments_duration < audio_dur:
+                # Extende o último segmento se necessário
+                if segments:
+                    last_video, last_take = segments[-1]
+                    needed_extension = audio_dur - total_segments_duration + safety_margin
+                    segments[-1] = (last_video, last_take + needed_extension)
+
+            # Criar arquivo temporário com lista de inputs para FFmpeg
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                temp_file = f.name
+
+                # Define a pasta base para usar caminhos relativos
+                base_folder = Path(folder).resolve()
+
+                for v, take in segments:
+                    # Para vídeos - usa caminho relativo quando possível
+                    try:
+                        rel_path = Path(v).resolve().relative_to(base_folder)
+                        video_path = str(Path(folder) / rel_path).replace('\\', '/')
+                    except ValueError:
+                        # Se não conseguir obter caminho relativo, usa absoluto com escape
+                        video_path = str(v).replace('\\', '/')
+
+                    f.write(f"file '{video_path}'\n")
+                    f.write(f"duration {take:.3f}\n")
+
+            # Usar o arquivo de concatenação
+            ctx["concat_file"] = temp_file
+
+            # Adiciona input do concat file
+            if segments:
+                inputs += ["-f", "concat", "-safe", "0", "-i", temp_file]
+
         elif video_mode == "images":
             images = list_images(folder)
             if not images:
                 raise FileNotFoundError(f"Nenhuma imagem com extensões suportadas em: {folder}")
-            segments = pick_image_segments_to_cover(audio_dur, images, image_segment_duration, seed=seed)
 
-            # Usa vídeos em cache se disponível
+            # Se houver transições, adiciona tempo extra
+            if transition_type != "none":
+                num_transitions = (audio_dur / image_segment_duration) - 1
+                num_transitions = max(0, int(num_transitions))
+                extra_duration_needed = num_transitions * 1.5
+            else:
+                extra_duration_needed = 0
+
+            total_duration_needed = audio_dur + extra_duration_needed + safety_margin
+            segments = pick_image_segments_to_cover(
+                total_duration_needed,
+                images,
+                image_segment_duration,
+                seed=seed
+            )
+
             cached_images = ctx.get("cached_images", {})
+            ken_burns_enabled = ctx.get("enable_ken_burns", False)
 
-            for img, take in segments:
-                # Verifica se existe versão em cache
-                if str(img) in cached_images:
-                    # Usa o vídeo pré-renderizado do cache
-                    cached_video = cached_images[str(img)]
-                    inputs += ["-i", cached_video]
-                else:
-                    # Fallback: usa a imagem original
-                    inputs += ["-loop", "1", "-t", f"{take:.3f}", "-i", str(img)]
+            # Criar arquivo temporário com lista de inputs para FFmpeg
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                temp_file = f.name
 
-            for idx, (img, take) in enumerate(segments, start=1):
-                label_in = f"{idx}:v"
-                take_str = f"{take:.3f}"
-                vout = f"v{idx}"
+                # Define a pasta base para usar caminhos relativos
+                base_folder = Path(folder).resolve()
 
-                ken_burns_enabled = ctx.get("enable_ken_burns", False)
-
-                # Se usa cache, aplica apenas Ken Burns se habilitado
-                if str(img) in cached_images:
-                    if ken_burns_enabled:
-                        # Ken Burns effect com posição aleatória
-                        zoom_duration = int(take * fps)
-                        zoom_positions = {
-                            "center": ("iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),
-                            "top_right": ("iw-iw/zoom", "0"),
-                            "top_left": ("0", "0"),
-                            "bottom_right": ("iw-iw/zoom", "ih-ih/zoom"),
-                            "bottom_left": ("0", "ih-ih/zoom")
-                        }
-                        position = random.choice(list(zoom_positions.keys()))
-                        x_pos, y_pos = zoom_positions[position]
-
-                        chain = (
-                            f"[{label_in}]"
-                            f"zoompan=z='min(zoom+0.0015,1.1)':d={zoom_duration}:x='{x_pos}':y='{y_pos}',"
-                            f"trim=0:{take_str},setpts=PTS-STARTPTS"
-                            f"[{vout}]"
-                        )
+                for img, take in segments:
+                    if str(img) in cached_images:
+                        # Para imagens em cache (vídeos pré-processados)
+                        cache_path = cached_images[str(img)].replace('\\', '/')
+                        f.write(f"file '{cache_path}'\n")
+                        f.write(f"duration {take:.3f}\n")
                     else:
-                        chain = (
-                            f"[{label_in}]"
-                            f"trim=0:{take_str},setpts=PTS-STARTPTS"
-                            f"[{vout}]"
-                        )
-                else:
-                    # Fallback: processamento original da imagem
-                    if ken_burns_enabled:
-                        # Ken Burns effect with zoompan - 5 posições aleatórias
-                        zoom_duration = int(take * fps)
+                        # Para imagens estáticas - usa caminho relativo quando possível
+                        try:
+                            rel_path = Path(img).resolve().relative_to(base_folder)
+                            img_path = str(Path(folder) / rel_path).replace('\\', '/')
+                        except ValueError:
+                            # Se não conseguir obter caminho relativo, usa absoluto com escape
+                            img_path = str(img).replace('\\', '/')
 
-                        # Define as 5 posições de zoom
-                        zoom_positions = {
-                            "center": ("iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),
-                            "top_right": ("iw-iw/zoom", "0"),
-                            "top_left": ("0", "0"),
-                            "bottom_right": ("iw-iw/zoom", "ih-ih/zoom"),
-                            "bottom_left": ("0", "ih-ih/zoom")
-                        }
+                        f.write(f"file '{img_path}'\n")
+                        f.write(f"duration {take:.3f}\n")
 
-                        # Escolhe posição aleatória
-                        position = random.choice(list(zoom_positions.keys()))
-                        x_pos, y_pos = zoom_positions[position]
+            # Usar o arquivo de concatenação
+            ctx["concat_file"] = temp_file
 
-                        chain = (
-                            f"[{label_in}]"
-                            f"zoompan=z='min(zoom+0.0015,1.1)':d={zoom_duration}:x='{x_pos}':y='{y_pos}',"
-                            f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease,"
-                            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-                            f"setsar=1,"
-                            f"trim=0:{take_str},setpts=PTS-STARTPTS"
-                            f"[{vout}]"
-                        )
-                    else:
-                        chain = (
-                            f"[{label_in}]"
-                            f"fps={fps},"
-                            f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease,"
-                            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-                            f"setsar=1,"
-                            f"trim=0:{take_str},setpts=PTS-STARTPTS"
-                            f"[{vout}]"
-                        )
-                vf_parts.append(chain)
-                vlabels.append(f"[{vout}]")
-            concat = "".join(vlabels) + f"concat=n={len(segments)}:v=1:a=0[vout]"
-            filter_complex = ";".join(vf_parts + [concat])
+            # Adiciona input do concat file
+            if segments:
+                inputs += ["-f", "concat", "-safe", "0", "-i", temp_file]
+
+            # REMOVIDO: A lógica antiga que criava filtros individuais para cada imagem
+            # Isso estava causando conflito com o concat file
+
         else:
             raise ValueError(f"Modo de vídeo inválido: {video_mode}. Use 'videos' ou 'images'.")
 
-        # Salva filter_complex em arquivo se muito grande
-        if len(filter_complex) > 32768:  # 32KB limit
-            import tempfile
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                f.write(filter_complex)
-                ctx["filter_complex_file"] = f.name
-                ctx["use_filter_complex_file"] = True
-        else:
-            ctx["filter_complex"] = filter_complex
-            ctx["use_filter_complex_file"] = False
+        # CORREÇÃO PRINCIPAL: Lógica unificada para concat file
+        if "concat_file" in ctx:
+            # Com arquivo de concat, temos apenas um stream de entrada (1:v)
+            # Precisamos separar os segmentos via filtros de trim baseados em tempo
+            segment_labels = []
+            current_time = 0.0
+            video_input_idx = 1  # Índice do concat file (sempre 1)
 
-        ctx["inputs"] = inputs
-        ctx["map_out"] = "[vout]"
-        ctx["audio_idx"] = 0
-        ctx["segments"] = segments
-        return ctx
+            for idx, (_, take) in enumerate(segments, start=1):
+                in_label = f"{video_input_idx}:v"  # Sempre [1:v] pois é concat file
+                out_label = f"v{idx}"
+                segment_labels.append(out_label)
 
-class OverlayStage(PipelineStage):
-    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
-        if ctx.get("overlay"):
-            overlay = ctx["overlay"]
-            overlay_opacity = ctx["overlay_opacity"]
-            inputs = ctx["inputs"]
-            use_filter_file = ctx.get("use_filter_complex_file", False)
-
-            if use_filter_file:
-                # Lê o filtro do arquivo
-                with open(ctx["filter_complex_file"], 'r') as f:
-                    filter_complex = f.read()
-            else:
-                filter_complex = ctx["filter_complex"]
-
-            map_out = ctx["map_out"]
-            audio_idx = ctx["audio_idx"]
-            overlay_path = str(overlay)
-            overlay_idx = sum(1 for x in inputs if x == "-i")
-            inputs += ["-stream_loop", "-1", "-i", overlay_path]
-            overlay_filter = f"[{overlay_idx}:v]format=rgba,colorchannelmixer=aa={overlay_opacity}[ol];{map_out}[ol]overlay=shortest=1:format=auto[vfinal]"
-            filter_complex = f"{filter_complex};{overlay_filter}"
-            map_out = "[vfinal]"
-
-            # Atualiza arquivo ou variável
-            if len(filter_complex) > 32768:
-                import tempfile
-                if use_filter_file:
-                    # Sobrescreve arquivo existente
-                    with open(ctx["filter_complex_file"], 'w') as f:
-                        f.write(filter_complex)
-                else:
-                    # Cria novo arquivo
-                    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                        f.write(filter_complex)
-                        ctx["filter_complex_file"] = f.name
-                        ctx["use_filter_complex_file"] = True
-            else:
-                ctx["filter_complex"] = filter_complex
-                ctx["use_filter_complex_file"] = False
-
-            ctx["inputs"] = inputs
-            ctx["map_out"] = map_out
-            ctx["audio_idx"] = audio_idx
-        return ctx
-
-class LogoStage(PipelineStage):
-    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
-        if ctx.get("logo"):
-            logo = ctx["logo"]
-            logo_scale = ctx.get("logo_scale", 0.15)
-            logo_position = ctx.get("logo_position", "top_right")
-            width = ctx.get("width", 1920)
-            height = ctx.get("height", 1080)
-            inputs = ctx["inputs"]
-            use_filter_file = ctx.get("use_filter_complex_file", False)
-
-            if use_filter_file:
-                with open(ctx["filter_complex_file"], 'r') as f:
-                    filter_complex = f.read()
-            else:
-                filter_complex = ctx["filter_complex"]
-
-            map_out = ctx["map_out"]
-            logo_idx = sum(1 for x in inputs if x == "-i")
-            inputs += ["-i", str(logo)]
-
-            pos_map = {
-                "top_left": (20, 20),
-                "top_center": (f"(main_w-overlay_w)/2", 20),
-                "top_right": (f"main_w-overlay_w-20", 20),
-                "bottom_left": (20, f"main_h-overlay_h-20"),
-                "bottom_center": (f"(main_w-overlay_w)/2", f"main_h-overlay_h-20"),
-                "bottom_right": (f"main_w-overlay_w-20", f"main_h-overlay_h-20"),
-                "center": (f"(main_w-overlay_w)/2", f"(main_h-overlay_h)/2"),
-            }
-            logo_x, logo_y = pos_map.get(logo_position, (20, 20))
-            logo_filter = (
-                f"[{logo_idx}:v]scale=iw*{logo_scale}:ih*{logo_scale}[logo];"
-                f"{map_out}[logo]overlay=x={logo_x}:y={logo_y}:format=auto[vlogo]"
-            )
-            filter_complex = f"{filter_complex};{logo_filter}"
-            map_out = "[vlogo]"
-
-            # Atualiza arquivo ou variável
-            if len(filter_complex) > 32768:
-                import tempfile
-                if use_filter_file:
-                    with open(ctx["filter_complex_file"], 'w') as f:
-                        f.write(filter_complex)
-                else:
-                    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                        f.write(filter_complex)
-                        ctx["filter_complex_file"] = f.name
-                        ctx["use_filter_complex_file"] = True
-            else:
-                ctx["filter_complex"] = filter_complex
-                ctx["use_filter_complex_file"] = False
-
-            ctx["inputs"] = inputs
-            ctx["map_out"] = map_out
-        return ctx
-
-class ChromaStage(PipelineStage):
-    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
-        chroma_list = ctx.get("chroma_list")
-        # Compatibilidade: se não houver chroma_list, usa o chroma único
-        if not chroma_list and ctx.get("chroma"):
-            chroma_list = [{
-                "path": ctx["chroma"],
-                "scale": ctx.get("chroma_scale", 0.5),
-                "position": ctx.get("chroma_position", "bottom_right"),
-                "start": ctx.get("chroma_start", 0)
-            }]
-        if chroma_list:
-            inputs = ctx["inputs"]
-            use_filter_file = ctx.get("use_filter_complex_file", False)
-
-            if use_filter_file:
-                with open(ctx["filter_complex_file"], 'r') as f:
-                    filter_complex = f.read()
-            else:
-                filter_complex = ctx["filter_complex"]
-
-            map_out = ctx["map_out"]
-            from audio_utils import duration_seconds
-            pos_map = {
-                "top_left": (20, 20),
-                "top_center": (f"(main_w-overlay_w)/2", 20),
-                "top_right": (f"main_w-overlay_w-20", 20),
-                "bottom_left": (20, f"main_h-overlay_h-20"),
-                "bottom_center": (f"(main_w-overlay_w)/2", f"main_h-overlay_h-20"),
-                "bottom_right": (f"main_w-overlay_w-20", f"main_h-overlay_h-20"),
-                "center": (f"(main_w-overlay_w)/2", f"(main_h-overlay_h)/2"),
-            }
-            last_map = map_out
-            for chroma in chroma_list:
-                chroma_path = chroma["path"]
-                chroma_scale = chroma.get("scale", 0.5)
-                chroma_position = chroma.get("position", "bottom_right")
-                chroma_start = chroma.get("start", 0)
-                chroma_duration = duration_seconds(Path(chroma_path))
-                chroma_end = chroma_start + chroma_duration
-                chroma_idx = sum(1 for x in inputs if x == "-i")
-                inputs += ["-i", str(chroma_path)]
-                chroma_x, chroma_y = pos_map.get(chroma_position, (20, 20))
-                chroma_filter = (
-                    f"[{chroma_idx}:v]trim=start=0:end={chroma_duration},setpts=PTS+{chroma_start}/TB,colorkey=0x00FF00:0.3:0.2,scale=iw*{chroma_scale}:ih*{chroma_scale}[chroma{chroma_idx}];"
-                    f"{last_map}[chroma{chroma_idx}]overlay=x={chroma_x}:y={chroma_y}:enable='between(t,{chroma_start},{chroma_end})':format=auto[vchroma{chroma_idx}]"
+                # Corta o segmento na posição temporal atual
+                trim_filter = (
+                    f"[{in_label}]trim=start={current_time}:end={current_time + take},"
+                    f"setpts=PTS-STARTPTS[{out_label}]"
                 )
-                filter_complex = f"{filter_complex};{chroma_filter}"
-                last_map = f"[vchroma{chroma_idx}]"
+                filter_builder.add_filter(trim_filter)
+                current_time += take
+        else:
+            # Modo antigo para compatibilidade (não deve ser usado com a nova arquitetura)
+            segment_labels = [f"v{i}" for i in range(1, len(segments) + 1)]
 
-            # Atualiza arquivo ou variável
-            if len(filter_complex) > 32768:
-                import tempfile
-                if use_filter_file:
-                    with open(ctx["filter_complex_file"], 'w') as f:
-                        f.write(filter_complex)
-                else:
-                    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                        f.write(filter_complex)
-                        ctx["filter_complex_file"] = f.name
-                        ctx["use_filter_complex_file"] = True
-            else:
-                ctx["filter_complex"] = filter_complex
-                ctx["use_filter_complex_file"] = False
+        ctx["filter_builder"] = filter_builder
+        ctx["inputs"] = inputs
+        ctx["segments"] = segments
+        ctx["segment_labels"] = segment_labels
+        ctx["video_input_idx"] = 1  # Armazena índice do input de vídeo para uso nos outros estágios
+        ctx["audio_idx"] = 0
 
-            ctx["inputs"] = inputs
-            ctx["map_out"] = last_map
         return ctx
+
 
 class TransitionStage(PipelineStage):
+    """Estágio de transições melhorado com correção de duração"""
+
     SUPPORTED_TRANSITIONS = [
         "fade", "wipeleft", "wiperight", "wipeup", "wipedown",
         "slideleft", "slideright", "slideup", "slidedown",
@@ -368,130 +255,223 @@ class TransitionStage(PipelineStage):
         "coverright", "coverup", "coverdown", "revealleft", "revealright",
         "revealup", "revealdown"
     ]
-    # Subconjunto de transições leves para random
+
     LIGHT_TRANSITIONS = [
         "fade", "wipeleft", "wiperight", "wipeup", "wipedown",
         "slideleft", "slideright", "slideup", "slidedown", "dissolve"
     ]
+
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         transition_type = ctx.get("transition_type", "none")
-        if transition_type == "none":
-            return ctx
-
+        filter_builder = ctx["filter_builder"]
         segments = ctx.get("segments", [])
-        if len(segments) < 2:
-            return ctx
-
-        existing_filter = ctx.get("filter_complex", "")
+        segment_labels = ctx.get("segment_labels", [])
+        audio_duration = ctx["audio_duration"]
         fps = ctx.get("fps", 30)
 
-        # OTIMIZAÇÃO: Em vez de processar cada imagem separadamente e depois aplicar
-        # transições em cascata, vamos criar um filter graph mais eficiente
+        if transition_type == "none" or len(segments) < 2:
+            # Sem transições - apenas concatena
+            concat_labels = "".join(f"[{label}]" for label in segment_labels)
+            concat_filter = f"{concat_labels}concat=n={len(segments)}:v=1:a=0[vout]"
+            filter_builder.add_filter(concat_filter)
+            filter_builder.set_output("[vout]")
+        else:
+            # Prepara filtros de configuração uniforme
+            prep_filters = []
+            clean_labels = []
+            for i, label in enumerate(segment_labels):
+                dst = f"vc{i + 1}"
+                prep_filter = f"[{label}]settb=AVTB,fps={fps},format=yuv420p[{dst}]"
+                filter_builder.add_filter(prep_filter)
+                clean_labels.append(dst)
 
-        # 1) Prepara entradas de vídeo com configurações uniformes - apenas uma vez
-        prep_filters = []
-        clean_labels = []
-        for i in range(1, len(segments) + 1):
-            src = f"v{i}"
-            dst = f"vc{i}"  # "v-clean"
-            # Aplica configurações básicas uniformes apenas uma vez por imagem
-            prep_filters.append(f"[{src}]settb=AVTB,fps={fps},format=yuv420p[{dst}]")
-            clean_labels.append(dst)
+            # Com transições
+            transition_opts = [t for t in self.SUPPORTED_TRANSITIONS if t != "fade"]
 
-        # 2) Transições em grupos paralelos, sem encadeamento excessivo
-        transition_opts = [t for t in self.SUPPORTED_TRANSITIONS if t != "fade"]
+            prev_label = clean_labels[0]
+            prev_dur = segments[0][1]
 
-        # Vamos processar em grupos de 4-6 imagens para evitar cascata muito longa
-        group_size = min(6, max(4, len(segments) // 3))
-        if len(segments) <= group_size:
-            # Se tivermos poucas imagens, usamos o método original
-            group_size = len(segments)
-
-        groups = []
-        for i in range(0, len(clean_labels), group_size):
-            groups.append(clean_labels[i:i+group_size])
-
-        # Processa cada grupo separadamente
-        group_outputs = []
-        group_filters = []
-
-        for group_idx, group in enumerate(groups):
-            if len(group) == 1:
-                # Se só tem um item no grupo, não precisa de transição
-                group_outputs.append(group[0])
-                continue
-
-            # Processa transições dentro do grupo
-            prev_label = group[0]
-            prev_dur = segments[group_idx * group_size][1]  # duração do primeiro take no grupo
-            transitions = []
-
-            for i in range(1, len(group)):
-                global_idx = group_idx * group_size + i
-                if global_idx >= len(segments):  # Proteção contra índice fora do limite
-                    continue
-
+            for i in range(1, len(clean_labels)):
                 if transition_type == "random":
                     ttype = random.choice(transition_opts)
                 else:
                     ttype = transition_type if transition_type in self.SUPPORTED_TRANSITIONS else "fade"
 
-                curr_label = group[i]
-                curr_dur = segments[global_idx][1]
+                curr_label = clean_labels[i]
+                curr_dur = segments[i][1]
 
-                # offset relativo ao primeiro input do xfade atual
+                # Offset correto para garantir cobertura total
                 offset = max(prev_dur - 1, 0)
 
-                mid = f"t{group_idx}_{i}"
-                out = f"trans{group_idx}_{i}"
-                trans = (
-                    f"[{prev_label}][{curr_label}]xfade=transition={ttype}:duration=1:offset={offset}[{out}]"
+                out_label = f"trans{i}"
+                trans_filter = (
+                    f"[{prev_label}][{curr_label}]xfade=transition={ttype}:"
+                    f"duration=1:offset={offset}[{out_label}]"
                 )
-                transitions.append(trans)
+                filter_builder.add_filter(trans_filter)
 
-                prev_label = out
-                prev_dur = prev_dur + curr_dur - 1
+                prev_label = out_label
+                prev_dur = prev_dur + curr_dur - 1  # Ajusta duração considerando sobreposição
 
-            # Adiciona as transições do grupo
-            group_filters.extend(transitions)
-            # Último output do grupo
-            if transitions:  # Se tiver transições, usa o último label de saída
-                group_outputs.append(prev_label)
-            else:  # Caso contrário, usa a primeira entrada limpa
-                group_outputs.append(group[0])
+            # Garante que o vídeo cubra toda a duração do áudio
+            final_label = prev_label
+            if prev_dur < audio_duration:
+                # Adiciona padding para cobrir duração restante
+                pad_duration = max(audio_duration - prev_dur, 0.1)
+                pad_filter = f"[{final_label}]tpad=stop_duration={pad_duration}[vout]"
+                filter_builder.add_filter(pad_filter)
+                filter_builder.set_output("[vout]")
+            else:
+                # Renomeia para vout
+                rename_filter = f"[{final_label}]null[vout]"
+                filter_builder.add_filter(rename_filter)
+                filter_builder.set_output("[vout]")
 
-        # 3) Concatena os grupos
-        if len(group_outputs) > 1:
-            concat_labels = "".join(f"[{label}]" for label in group_outputs)
-            final_out = "vout"  # Mudança: usar "vout" em vez de "final_out"
-            concat_filter = f"{concat_labels}concat=n={len(group_outputs)}:v=1:a=0[{final_out}]"
-            group_filters.append(concat_filter)
-            final_label = f"[{final_out}]"  # Adicionamos os colchetes aqui
-        else:
-            final_label = f"[{group_outputs[0]}]"
-
-        # 4) Recria o filter_complex removendo o concat original
-        filter_parts = [f for f in existing_filter.split(";") if "concat=" not in f]
-        filter_parts.extend(prep_filters)
-        filter_parts.extend(group_filters)
-
-        # Cria filter_complex como arquivo temporário se for muito grande
-        filter_complex = ";".join(filter_parts)
-        if len(filter_complex) > 50000:
-            import tempfile
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                f.write(filter_complex)
-                ctx["filter_complex_file"] = f.name
-                ctx["use_filter_complex_file"] = True
-        else:
-            ctx["filter_complex"] = filter_complex
-            ctx["use_filter_complex_file"] = False
-
-        ctx["map_out"] = final_label
+        ctx["map_out"] = "[vout]"
         return ctx
 
+
+class OverlayStage(PipelineStage):
+    """Overlay melhorado com duração garantida"""
+
+    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        if not ctx.get("overlay"):
+            return ctx
+
+        overlay = ctx["overlay"]
+        overlay_opacity = ctx["overlay_opacity"]
+        filter_builder = ctx["filter_builder"]
+        inputs = ctx["inputs"]
+        width = ctx.get("width", 1920)
+        height = ctx.get("height", 1080)
+        map_out = ctx["map_out"]
+        audio_duration = ctx["audio_duration"]
+
+        # Calcula o índice ANTES de adicionar o novo input
+        overlay_idx = sum(1 for x in inputs if x == "-i")
+        inputs += ["-stream_loop", "-1", "-t", str(audio_duration), "-i", str(overlay)]
+
+        overlay_filter = (
+            f"[{overlay_idx}:v]format=rgba,scale={width}:{height},"
+            f"colorchannelmixer=aa={overlay_opacity}[ol];"
+            f"{map_out}[ol]overlay=0:0:format=auto[vfinal]"
+        )
+        filter_builder.add_filter(overlay_filter)
+        filter_builder.set_output("[vfinal]")
+
+        ctx["inputs"] = inputs
+        ctx["map_out"] = "[vfinal]"
+
+        return ctx
+
+
+class LogoStage(PipelineStage):
+    """Estágio de logo adaptado para FilterBuilder"""
+
+    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        if not ctx.get("logo"):
+            return ctx
+
+        logo = ctx["logo"]
+        logo_scale = ctx.get("logo_scale", 0.15)
+        logo_position = ctx.get("logo_position", "top_right")
+        filter_builder = ctx["filter_builder"]
+        inputs = ctx["inputs"]
+        map_out = ctx["map_out"]
+
+        # Calcula o índice ANTES de adicionar o novo input
+        logo_idx = sum(1 for x in inputs if x == "-i")
+        inputs += ["-i", str(logo)]
+
+        pos_map = {
+            "top_left": (20, 20),
+            "top_center": (f"(main_w-overlay_w)/2", 20),
+            "top_right": (f"main_w-overlay_w-20", 20),
+            "bottom_left": (20, f"main_h-overlay_h-20"),
+            "bottom_center": (f"(main_w-overlay_w)/2", f"main_h-overlay_h-20"),
+            "bottom_right": (f"main_w-overlay_w-20", f"main_h-overlay_h-20"),
+            "center": (f"(main_w-overlay_w)/2", f"(main_h-overlay_h)/2"),
+        }
+        logo_x, logo_y = pos_map.get(logo_position, (20, 20))
+
+        logo_filter = (
+            f"[{logo_idx}:v]scale=iw*{logo_scale}:ih*{logo_scale}[logo];"
+            f"{map_out}[logo]overlay=x={logo_x}:y={logo_y}:format=auto[vlogo]"
+        )
+        filter_builder.add_filter(logo_filter)
+        filter_builder.set_output("[vlogo]")
+
+        ctx["inputs"] = inputs
+        ctx["map_out"] = "[vlogo]"
+
+        return ctx
+
+
+class ChromaStage(PipelineStage):
+    """Estágio de chroma key adaptado para FilterBuilder"""
+
+    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        chroma_list = ctx.get("chroma_list")
+        # Compatibilidade: se não houver chroma_list, usa o chroma único
+        if not chroma_list and ctx.get("chroma"):
+            chroma_list = [{
+                "path": ctx["chroma"],
+                "scale": ctx.get("chroma_scale", 0.5),
+                "position": ctx.get("chroma_position", "bottom_right"),
+                "start": ctx.get("chroma_start", 0)
+            }]
+
+        if not chroma_list:
+            return ctx
+
+        filter_builder = ctx["filter_builder"]
+        inputs = ctx["inputs"]
+        map_out = ctx["map_out"]
+
+        pos_map = {
+            "top_left": (20, 20),
+            "top_center": (f"(main_w-overlay_w)/2", 20),
+            "top_right": (f"main_w-overlay_w-20", 20),
+            "bottom_left": (20, f"main_h-overlay_h-20"),
+            "bottom_center": (f"(main_w-overlay_w)/2", f"main_h-overlay_h-20"),
+            "bottom_right": (f"main_w-overlay_w-20", f"main_h-overlay_h-20"),
+            "center": (f"(main_w-overlay_w)/2", f"(main_h-overlay_h)/2"),
+        }
+
+        last_map = map_out
+        for chroma in chroma_list:
+            chroma_path = chroma["path"]
+            chroma_scale = chroma.get("scale", 0.5)
+            chroma_position = chroma.get("position", "bottom_right")
+            chroma_start = chroma.get("start", 0)
+
+            chroma_duration = duration_seconds(Path(chroma_path))
+            chroma_end = chroma_start + chroma_duration
+
+            # Calcula o índice ANTES de adicionar o novo input
+            chroma_idx = sum(1 for x in inputs if x == "-i")
+            inputs += ["-i", str(chroma_path)]
+
+            chroma_x, chroma_y = pos_map.get(chroma_position, (20, 20))
+
+            chroma_filter = (
+                f"[{chroma_idx}:v]trim=start=0:end={chroma_duration},setpts=PTS+{chroma_start}/TB,"
+                f"colorkey=0x00FF00:0.3:0.2,scale=iw*{chroma_scale}:ih*{chroma_scale}[chroma{chroma_idx}];"
+                f"{last_map}[chroma{chroma_idx}]overlay=x={chroma_x}:y={chroma_y}:"
+                f"enable='between(t,{chroma_start},{chroma_end})':format=auto[vchroma{chroma_idx}]"
+            )
+            filter_builder.add_filter(chroma_filter)
+            last_map = f"[vchroma{chroma_idx}]"
+
+        filter_builder.set_output(last_map)
+        ctx["inputs"] = inputs
+        ctx["map_out"] = last_map
+
+        return ctx
+
+
 class CinematicStage(PipelineStage):
-    """Aplica efeitos cinematográficos como LUT, curves, vignette"""
+    """Aplica efeitos cinematográficos adaptado para FilterBuilder"""
 
     CINEMATIC_PRESETS = {
         "warm": {
@@ -527,15 +507,7 @@ class CinematicStage(PipelineStage):
         if not any([cinematic_preset, custom_lut, enable_vignette, enable_curves]):
             return ctx
 
-        use_filter_file = ctx.get("use_filter_complex_file", False)
-
-        if use_filter_file:
-            # Lê o filtro do arquivo
-            with open(ctx["filter_complex_file"], 'r') as f:
-                filter_complex = f.read()
-        else:
-            filter_complex = ctx["filter_complex"]
-
+        filter_builder = ctx["filter_builder"]
         map_out = ctx["map_out"]
 
         cinematic_filters = []
@@ -550,7 +522,8 @@ class CinematicStage(PipelineStage):
             elif preset.get("lut") == "cold_lut":
                 cinematic_filters.append("colortemperature=temperature=7000")
             elif preset.get("lut") == "vintage_lut":
-                cinematic_filters.append("colorchannelmixer=rr=0.393:rg=0.769:rb=0.189:gr=0.349:gg=0.686:gb=0.168:br=0.272:bg=0.534:bb=0.131")
+                cinematic_filters.append(
+                    "colorchannelmixer=rr=0.393:rg=0.769:rb=0.189:gr=0.349:gg=0.686:gb=0.168:br=0.272:bg=0.534:bb=0.131")
             elif preset.get("lut") == "cinematic_lut":
                 cinematic_filters.append("eq=contrast=1.2:brightness=0.05:saturation=0.9")
 
@@ -569,7 +542,7 @@ class CinematicStage(PipelineStage):
         if curves_filter:
             cinematic_filters.append(curves_filter)
 
-        # Aplicar vignette - funciona independente do preset
+        # Aplicar vignette
         if enable_vignette:
             angle_value = vignette_intensity * 3.14159 / 4
             cinematic_filters.append(f"vignette=angle={angle_value}")
@@ -578,165 +551,129 @@ class CinematicStage(PipelineStage):
             cinematic_chain = ",".join(cinematic_filters)
             cinematic_out = "[vcinematic]"
             cinematic_filter = f"{map_out}{cinematic_chain}{cinematic_out}"
-            filter_complex = f"{filter_complex};{cinematic_filter}"
-
-            # Atualiza arquivo ou variável
-            if len(filter_complex) > 32768:
-                import tempfile
-                if use_filter_file:
-                    # Sobrescreve arquivo existente
-                    with open(ctx["filter_complex_file"], 'w') as f:
-                        f.write(filter_complex)
-                else:
-                    # Cria novo arquivo
-                    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                        f.write(filter_complex)
-                        ctx["filter_complex_file"] = f.name
-                        ctx["use_filter_complex_file"] = True
-            else:
-                ctx["filter_complex"] = filter_complex
-                ctx["use_filter_complex_file"] = False
-
+            filter_builder.add_filter(cinematic_filter)
+            filter_builder.set_output(cinematic_out)
             ctx["map_out"] = cinematic_out
 
         return ctx
 
+
 class SubtitleStage(PipelineStage):
+    """Estágio de legendas adaptado para FilterBuilder"""
+
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
-        if ctx.get("enable_subtitles"):
-            from subtitle_utils import extract_audio_for_transcription, transcribe_audio, generate_ass_file
-            import tempfile
-            import os
+        if not ctx.get("enable_subtitles"):
+            return ctx
 
-            narration_path = ctx["narration_path"]
-            subtitle_font_size = ctx.get("subtitle_font_size", 24)
-            subtitle_color = ctx.get("subtitle_color", "white")
-            subtitle_position = ctx.get("subtitle_position", "bottom_center")
-            subtitle_font = ctx.get("subtitle_font", "Noto Sans")
-            words_per_subtitle = ctx.get("words_per_subtitle", 1)
-            vosk_model_path = ctx.get("vosk_model_path", "_internal/vosk_models/vosk-model-pt")
+        narration_path = ctx["narration_path"]
+        subtitle_font_size = ctx.get("subtitle_font_size", 24)
+        subtitle_color = ctx.get("subtitle_color", "white")
+        subtitle_position = ctx.get("subtitle_position", "bottom_center")
+        subtitle_font = ctx.get("subtitle_font", "Noto Sans")
+        words_per_subtitle = ctx.get("words_per_subtitle", 1)
+        vosk_model_path = ctx.get("vosk_model_path", "_internal/vosk_models/vosk-model-pt")
 
-            use_filter_file = ctx.get("use_filter_complex_file", False)
+        filter_builder = ctx["filter_builder"]
+        map_out = ctx["map_out"]
 
-            if use_filter_file:
-                with open(ctx["filter_complex_file"], 'r') as f:
-                    filter_complex = f.read()
-            else:
-                filter_complex = ctx["filter_complex"]
+        # Extrai áudio temporário para transcrição
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio:
+            temp_audio_path = temp_audio.name
 
-            map_out = ctx["map_out"]
+        # Arquivo ASS temporário
+        with tempfile.NamedTemporaryFile(suffix=".ass", delete=False) as temp_ass:
+            ass_file_path = temp_ass.name
 
-            # Extrai áudio temporário para transcrição
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio:
-                temp_audio_path = temp_audio.name
+        try:
+            extract_audio_for_transcription(narration_path, temp_audio_path)
+            segments = transcribe_audio(temp_audio_path, vosk_model_path)
 
-            # Arquivo ASS temporário
-            with tempfile.NamedTemporaryFile(suffix=".ass", delete=False) as temp_ass:
-                ass_file_path = temp_ass.name
+            if segments:
+                # Converte posição para alignment ASS
+                alignment_map = {
+                    "bottom_center": 2,
+                    "bottom_left": 1,
+                    "bottom_right": 3,
+                    "center": 5,
+                    "top_left": 7,
+                    "top_center": 8,
+                    "top_right": 9
+                }
+                alignment = alignment_map.get(subtitle_position, 2)
 
-            try:
-                extract_audio_for_transcription(narration_path, temp_audio_path)
-                segments = transcribe_audio(temp_audio_path, vosk_model_path)
+                # Converte cor para formato ASS (BGR)
+                color_ass = "&H00FFFFFF&"  # Branco padrão
+                if subtitle_color == "yellow":
+                    color_ass = "&H0000FFFF&"
+                elif subtitle_color == "red":
+                    color_ass = "&H000000FF&"
+                elif subtitle_color == "blue":
+                    color_ass = "&H00FF0000&"
 
-                if segments:
-                    # Converte posição para alignment ASS
-                    alignment_map = {
-                        "bottom_center": 2,
-                        "bottom_left": 1,
-                        "bottom_right": 3,
-                        "center": 5,
-                        "top_left": 7,
-                        "top_center": 8,
-                        "top_right": 9
-                    }
-                    alignment = alignment_map.get(subtitle_position, 2)
+                grouped = group_words_by_count(segments, words_per_subtitle)
+                # Gera arquivo ASS
+                generate_ass_file(
+                    grouped,
+                    ass_file_path,
+                    font=subtitle_font,
+                    size=subtitle_font_size,
+                    color=color_ass,
+                    alignment=alignment,
+                    playres_x=ctx.get("width", 1920),
+                    playres_y=ctx.get("height", 1080),
+                    subtitle_effect=ctx.get("subtitle_effect", "none")
+                )
 
-                    # Converte cor para formato ASS (BGR)
-                    color_ass = "&H00FFFFFF&"  # Branco padrão
-                    if subtitle_color == "yellow":
-                        color_ass = "&H0000FFFF&"
-                    elif subtitle_color == "red":
-                        color_ass = "&H000000FF&"
-                    elif subtitle_color == "blue":
-                        color_ass = "&H00FF0000&"
+                # Aplica filtro subtitles no vídeo
+                ass_path_escaped = str(Path(ass_file_path)).replace('\\', '\\\\').replace(':', '\\:')
+                subtitle_effect = ctx.get("subtitle_effect", "none")
 
-                    grouped = group_words_by_count(segments, words_per_subtitle)
-                    # Gera arquivo ASS
-                    generate_ass_file(
-                        grouped,
-                        ass_file_path,
-                        font=subtitle_font,
-                        size=subtitle_font_size,
-                        color=color_ass,
-                        alignment=alignment,
-                        playres_x=ctx.get("width", 1920),
-                        playres_y=ctx.get("height", 1080),
-                        subtitle_effect=ctx.get("subtitle_effect", "none")
-                    )
+                # Calcula y da barra conforme a posição da legenda
+                bar_h = 80
+                margin_v = 40
+                height = ctx.get("height", 1080)
+                y_map = {
+                    "bottom_center": f"ih-{bar_h + margin_v}",
+                    "bottom_left": f"ih-{bar_h + margin_v}",
+                    "bottom_right": f"ih-{bar_h + margin_v}",
+                    "top_center": f"{margin_v}",
+                    "top_left": f"{margin_v}",
+                    "top_right": f"{margin_v}",
+                    "center": f"(ih-{bar_h})/2"
+                }
+                bar_y = y_map.get(subtitle_position, f"ih-{bar_h + margin_v}")
 
-                    # Aplica filtro subtitles no vídeo
-                    # Escapa corretamente o caminho para Windows/FFmpeg
-                    ass_path_escaped = str(Path(ass_file_path)).replace('\\', '\\\\').replace(':', '\\:')
-                    subtitle_effect = ctx.get("subtitle_effect", "none")
-                    # Calcula y da barra conforme a posição da legenda
-                    subtitle_position = ctx.get("subtitle_position", "bottom_center")
-                    bar_h = 80
-                    margin_v = 40
-                    height = ctx.get("height", 1080)
-                    y_map = {
-                        "bottom_center": f"ih-{bar_h+margin_v}",
-                        "bottom_left": f"ih-{bar_h+margin_v}",
-                        "bottom_right": f"ih-{bar_h+margin_v}",
-                        "top_center": f"{margin_v}",
-                        "top_left": f"{margin_v}",
-                        "top_right": f"{margin_v}",
-                        "center": f"(ih-{bar_h})/2"
-                    }
-                    bar_y = y_map.get(subtitle_position, f"ih-{bar_h+margin_v}")
-                    if subtitle_effect == "fade_in":
-                        # Efeito de fade-in na legenda
-                        subtitle_filter = f"subtitles=filename='{ass_path_escaped}',fade=t=in:st=0:d=1"
-                        filter_complex = f"{filter_complex};{map_out}{subtitle_filter}[vsubtitles]"
-                        ctx["map_out"] = "[vsubtitles]"
-                    elif subtitle_effect == "fill_bar":
-                        # Barra atrás do texto, alinhada com a legenda
-                        bar_filter = f"drawbox=x=0:y={bar_y}:w='min(t*iw/2,iw)':h={bar_h}:color=yellow@0.95:t=fill"
-                        subtitle_filter = f"subtitles=filename='{ass_path_escaped}'"
-                        filter_complex = f"{filter_complex};{map_out}{bar_filter}[vbar];[vbar]{subtitle_filter}[vsubtitles]"
-                        ctx["map_out"] = "[vsubtitles]"
-                    else:
-                        # Sem efeito
-                        subtitle_filter = f"subtitles=filename='{ass_path_escaped}'"
-                        filter_complex = f"{filter_complex};{map_out}{subtitle_filter}[vsubtitles]"
-                        ctx["map_out"] = "[vsubtitles]"
-                    ctx["subtitle_file"] = ass_file_path  # Salva para limpeza posterior
+                if subtitle_effect == "fade_in":
+                    # Efeito de fade-in na legenda
+                    subtitle_filter = f"{map_out}subtitles=filename='{ass_path_escaped}',fade=t=in:st=0:d=1[vsubtitles]"
+                    filter_builder.add_filter(subtitle_filter)
+                    ctx["map_out"] = "[vsubtitles]"
+                elif subtitle_effect == "fill_bar":
+                    # Barra atrás do texto, alinhada com a legenda
+                    bar_filter = f"{map_out}drawbox=x=0:y={bar_y}:w='min(t*iw/2,iw)':h={bar_h}:color=yellow@0.95:t=fill[vbar]"
+                    subtitle_filter = f"[vbar]subtitles=filename='{ass_path_escaped}'[vsubtitles]"
+                    filter_builder.add_filter(bar_filter)
+                    filter_builder.add_filter(subtitle_filter)
+                    ctx["map_out"] = "[vsubtitles]"
+                else:
+                    # Sem efeito
+                    subtitle_filter = f"{map_out}subtitles=filename='{ass_path_escaped}'[vsubtitles]"
+                    filter_builder.add_filter(subtitle_filter)
+                    ctx["map_out"] = "[vsubtitles]"
 
-                    # Atualiza arquivo ou variável
-                    if len(filter_complex) > 32768:
-                        if use_filter_file:
-                            with open(ctx["filter_complex_file"], 'w') as f:
-                                f.write(filter_complex)
-                        else:
-                            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                                f.write(filter_complex)
-                                ctx["filter_complex_file"] = f.name
-                                ctx["use_filter_complex_file"] = True
-                    else:
-                        ctx["filter_complex"] = filter_complex
-                        ctx["use_filter_complex_file"] = False
+                ctx["subtitle_file"] = ass_file_path  # Salva para limpeza posterior
 
-            finally:
-                if os.path.exists(temp_audio_path):
-                    os.unlink(temp_audio_path)
+        finally:
+            if os.path.exists(temp_audio_path):
+                os.unlink(temp_audio_path)
 
         return ctx
+
 
 class ImageCacheStage(PipelineStage):
     """Pré-renderiza imagens em vídeos curtos para cache"""
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
-        import time
-
         video_mode = ctx.get("video_mode")
         if video_mode != "images":
             return ctx
@@ -869,6 +806,7 @@ class ImageCacheStage(PipelineStage):
 
         run(cmd)
 
+
 class EncoderStage(PipelineStage):
     """Configura encoder, resolução e parâmetros de qualidade"""
 
@@ -952,72 +890,84 @@ class EncoderStage(PipelineStage):
 
         return config
 
-class OutputStage(PipelineStage):
-    """Estágio final que gera o vídeo de saída"""
+
+class BackgroundMusicStage(PipelineStage):
+    """Estágio que adiciona trilha de fundo ao áudio"""
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
-        import time
-        import os
-        import glob
+        background_music = ctx.get("background_music")
+        background_music_volume = ctx.get("background_music_volume", 0.2)
 
+        if not background_music:
+            return ctx
+
+        music_path = Path(background_music)
+        if not music_path.exists():
+            print(f"Aviso: Arquivo de música de fundo não encontrado: {background_music}")
+            return ctx
+
+        print(f"Adicionando trilha de fundo: {background_music} (volume: {background_music_volume})")
+
+        # Adiciona a música de fundo aos inputs
+        inputs = ctx["inputs"]
+
+        # Calcula o índice ANTES de adicionar o novo input
+        music_idx = sum(1 for x in inputs if x == "-i")
+        inputs.extend(["-i", str(music_path)])
+
+        ctx["background_music_idx"] = music_idx
+        ctx["background_music_volume"] = background_music_volume
+        ctx["inputs"] = inputs
+
+        return ctx
+
+
+class OutputStage(PipelineStage):
+    """Estágio de saída com filter_complex centralizado"""
+
+    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         print("Iniciando renderização final...")
         start_time = time.time()
 
+        filter_builder = ctx["filter_builder"]
         inputs = ctx["inputs"]
         map_out = ctx["map_out"]
         audio_idx = ctx["audio_idx"]
         out_path = ctx["out_path"]
         encoder_config = ctx.get("encoder_config", {})
-        use_filter_file = ctx.get("use_filter_complex_file", False)
+        audio_duration = ctx["audio_duration"]
 
-        # Comando base
-        cmd = [get_ffmpeg_path()] + inputs
-
-        # Usa arquivo de filtro se disponível, senão filtro inline
-        if use_filter_file and ctx.get("filter_complex_file"):
-            cmd.extend(["-filter_complex_script", ctx["filter_complex_file"]])
-        else:
-            filter_complex = ctx.get("filter_complex", "")
-            cmd.extend(["-filter_complex", filter_complex])
-
-        cmd.extend(["-map", map_out])
-
-        # Processamento de áudio com trilha de fundo
+        # Processamento de áudio com música de fundo
         background_music_idx = ctx.get("background_music_idx")
         background_music_volume = ctx.get("background_music_volume", 0.2)
 
         if background_music_idx is not None:
-            # Calcula duração da narração para repetir a música
-            from audio_utils import duration_seconds
-            narration_duration = duration_seconds(ctx["narration_path"])
-
-            # Cria filtro de áudio que repete a música e mixa com a narração
+            # Adiciona filtro de áudio ao FilterBuilder
             audio_filter = (
-                f"[{background_music_idx}:a]aloop=loop=-1:size=2e+09,volume={background_music_volume}[bg];"
-                f"[{audio_idx}:a][bg]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+                f"[{background_music_idx}:a]aloop=loop=-1:size=2e+09,"
+                f"volume={background_music_volume}[bg];"
+                f"[{audio_idx}:a][bg]amix=inputs=2:duration=first:"
+                f"dropout_transition=2[aout]"
             )
-
-            # Adiciona filtro de áudio ao filtro complexo existente
-            if use_filter_file and ctx.get("filter_complex_file"):
-                with open(ctx["filter_complex_file"], 'r') as f:
-                    filter_complex = f.read()
-                filter_complex = f"{filter_complex};{audio_filter}"
-                with open(ctx["filter_complex_file"], 'w') as f:
-                    f.write(filter_complex)
-            else:
-                filter_complex = ctx.get("filter_complex", "")
-                filter_complex = f"{filter_complex};{audio_filter}"
-                cmd[cmd.index("-filter_complex") + 1] = filter_complex
-
-            cmd.extend(["-map", "[aout]"])
+            filter_builder.add_filter(audio_filter)
+            audio_map = "[aout]"
         else:
-            cmd.extend(["-map", f"{audio_idx}:a"])
+            audio_map = f"{audio_idx}:a"
+
+        # Salva filter_complex em arquivo
+        filter_file = filter_builder.save_to_file()
+        print(f"Filter complex salvo em: {filter_file}")
+
+        # Comando base
+        cmd = [get_ffmpeg_path()] + inputs
+        cmd.extend(["-filter_complex_script", filter_file])
+        cmd.extend(["-map", map_out])
+        cmd.extend(["-map", audio_map])
 
         # Configurações do encoder
         codec = encoder_config.get("codec", "libx264")
         cmd.extend(["-c:v", codec])
 
-        # Configurações específicas por codec
         if "nvenc" in codec:
             if "cq" in encoder_config:
                 cmd.extend(["-cq", encoder_config["cq"]])
@@ -1031,29 +981,25 @@ class OutputStage(PipelineStage):
             if "crf" in encoder_config:
                 cmd.extend(["-crf", encoder_config["crf"]])
 
-        # Threads
         if "threads" in encoder_config:
             cmd.extend(["-threads", encoder_config["threads"]])
 
         # Configurações de áudio e saída
-        cmd.extend(["-c:a", "aac", "-b:a", "128k", str(out_path)])
+        cmd.extend(["-c:a", "aac", "-b:a", "128k"])
+        # Garante duração exata do vídeo
+        cmd.extend(["-t", str(audio_duration)])
+        cmd.extend([str(out_path)])
 
         try:
-            # Log do comando (sem mostrar filtro complexo se muito grande)
-            if use_filter_file:
-                print(f"\nUsando arquivo de filtro: {ctx['filter_complex_file']}")
-
             print("Executando renderização...")
             run(cmd)
-
         finally:
-            # Remove arquivo temporário de filtro se existir
-            if use_filter_file and ctx.get("filter_complex_file"):
-                filter_file = ctx["filter_complex_file"]
-                if os.path.exists(filter_file):
-                    os.unlink(filter_file)
+            # Limpa arquivo temporário
+            if os.path.exists(filter_file):
+                os.unlink(filter_file)
+                print(f"Arquivo de filtro removido: {filter_file}")
 
-            # Remove arquivo ASS temporário se existir
+            # Remove arquivo ASS se existir
             if ctx.get("subtitle_file") and os.path.exists(ctx["subtitle_file"]):
                 os.unlink(ctx["subtitle_file"])
 
@@ -1066,7 +1012,8 @@ class OutputStage(PipelineStage):
                         os.unlink(cmd_file)
                     except OSError:
                         pass
-                print(f"Removidos {len(cmd_files)} arquivos de comando da cache")
+                if cmd_files:
+                    print(f"Removidos {len(cmd_files)} arquivos de comando da cache")
 
         total_time = time.time() - start_time
         print(f"Renderização final concluída em {total_time:.1f}s")
@@ -1074,40 +1021,14 @@ class OutputStage(PipelineStage):
         ctx["render_time"] = total_time
         return ctx
 
+
 class MediaPipeline:
+    """Pipeline principal para processamento de mídia"""
+
     def __init__(self, stages: TList[PipelineStage]):
         self.stages = stages
+
     def run(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         for stage in self.stages:
             ctx = stage(ctx)
-        return ctx
-
-class BackgroundMusicStage(PipelineStage):
-    """Estágio que adiciona trilha de fundo ao áudio"""
-
-    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
-        background_music = ctx.get("background_music")
-        background_music_volume = ctx.get("background_music_volume", 0.2)
-
-        if not background_music:
-            return ctx
-
-        from pathlib import Path
-        music_path = Path(background_music)
-        if not music_path.exists():
-            print(f"Aviso: Arquivo de música de fundo não encontrado: {background_music}")
-            return ctx
-
-        print(f"Adicionando trilha de fundo: {background_music} (volume: {background_music_volume})")
-
-        # Adiciona a música de fundo aos inputs
-        inputs = ctx["inputs"]
-        inputs.extend(["-i", str(music_path)])
-
-        # Atualiza índice da música de fundo
-        music_idx = len([inp for inp in inputs if inp == "-i"]) - 1
-        ctx["background_music_idx"] = music_idx
-        ctx["background_music_volume"] = background_music_volume
-        ctx["inputs"] = inputs
-
         return ctx
