@@ -79,7 +79,7 @@ def create_video_from_narration(
             stop_duration=silence_duration
         )
 
-    stages = [EncoderStage(), ImageCacheStage(), MediaCacheStage(), VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), CinematicStage(), SubtitleStage(), BackgroundMusicStage(), EndingStage(), OutputStage()]
+    stages = [EncoderStage(), MediaCacheStage(), VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), CinematicStage(), SubtitleStage(), BackgroundMusicStage(), EndingStage(), OutputStage()]
     ctx = {
         "narration_path": narration_path,
         "videos_folder": videos_folder,
@@ -169,7 +169,7 @@ if __name__ == "__main__":
     parser.add_argument("--chroma_start", type=float, default=30, help="Tempo de início do chroma (em segundos)")
     parser.add_argument('--chroma_list', type=str, default=None, help='Lista de chromas em JSON. Exemplo: \'[{"path": "./chroma1.mp4", "scale": 1, "position": "bottom_center", "start": 4}]\'')
 
-    parser.add_argument('--transition_type', default='none', choices=['none','fade', 'zoomin', 'smoothleft', 'smoothright', 'horzopen', 'random'], help='Tipo de transição entre vídeos')
+    parser.add_argument('--transition_type', default='none', choices=['none','fade', 'fadewhite', 'zoomin', 'smoothleft', 'smoothright', 'horzopen', 'random'], help='Tipo de transição entre vídeos')
 
     # Novos parâmetros para legendas
     parser.add_argument("--enable_subtitles", action="store_true", help="Habilita a adição de legendas automáticas no vídeo")

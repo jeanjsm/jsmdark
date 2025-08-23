@@ -274,7 +274,7 @@ class VideoGeneratorGUI(QMainWindow):
         images_layout.addRow("Duração por imagem (s):", self.image_segment_duration)
 
         self.transition_type = QComboBox()
-        self.transition_type.addItems(["none", "fade", "zoomin", "smoothleft", "smoothright", "horzopen", "random"])
+        self.transition_type.addItems(["none", "fade", "fadewhite", "zoomin", "smoothleft", "smoothright", "horzopen", "random"])
         images_layout.addRow("Transição:", self.transition_type)
 
         self.enable_ken_burns = QCheckBox("Habilitar efeito Ken Burns")
@@ -440,7 +440,7 @@ class VideoGeneratorGUI(QMainWindow):
         self.chroma_list_layout.removeWidget(group_widget)
         group_widget.deleteLater()
 
-        # Remover da lista (mantém índice para não bagunçar a ordem)
+        # Remover da lista (mantém índice para n��o bagunçar a ordem)
         if idx < len(self.chroma_widgets):
             self.chroma_widgets[idx] = None
 
@@ -870,6 +870,7 @@ class VideoGeneratorGUI(QMainWindow):
         self.bg_music_input.setText(config.get('background_music', ''))
         self.bg_music_volume.setValue(config.get('background_music_volume', 0.2))
         self.subtitle_effect.setCurrentText(config.get('subtitle_effect', 'none'))
+        self.ending_input.setText(config.get('ending_video_path', ''))
 
         # Carrega lista de chromas
         chroma_list = config.get('chroma_list', [])

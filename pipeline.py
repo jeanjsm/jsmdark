@@ -160,7 +160,6 @@ class VideoBaseStage(PipelineStage):
         return ctx
 
 
-
 class TransitionStage(PipelineStage):
     """Estágio de transições melhorado com correção de duração"""
 
@@ -194,7 +193,8 @@ class TransitionStage(PipelineStage):
         # Se só um segmento ou sem transição
         if transition == "none" or len(labels) < 2:
             concat_lbls = "".join(f"[{l}]" for l in labels)
-            fb.add_filter(f"{concat_lbls}concat=n={len(labels)}:v=1:a=0[vout]")
+            # Adiciona um trim para garantir a duração exata mesmo sem transições
+            fb.add_filter(f"{concat_lbls}concat=n={len(labels)}:v=1:a=0,trim=duration={audio_dur}[vout]")
             fb.set_output("[vout]")
             ctx["map_out"] = "[vout]"
             return ctx
@@ -215,15 +215,23 @@ class TransitionStage(PipelineStage):
             fb.add_filter(f"[{prev}][{curr}]xfade=transition={ttype}:duration=1:offset={offset}[{out}]")
             prev, prev_dur = out, prev_dur + curr_dur - 1
 
-        # Ajusta duração final
-        if prev_dur < audio_dur:
-            pad = audio_dur - prev_dur
-            fb.add_filter(f"[{prev}]tpad=stop_duration={pad}[vout]")
-        else:
-            fb.add_filter(f"[{prev}]null[vout]")
+        # ===================================================================
+        # INÍCIO DA ALTERAÇÃO: Garante a duração exata do vídeo principal
+        # ===================================================================
+        # O código antigo usava 'tpad' que só adicionava tempo, mas não removia o excesso.
+        # Usando 'trim' garantimos que o fluxo de vídeo principal tenha exatamente
+        # a duração da narração, cortando o que sobrar. Isso abre espaço para o
+        # vídeo de encerramento ser concatenado corretamente.
 
-        fb.set_output("[vout]")
-        ctx["map_out"] = "[vout]"
+        final_video_out = "[vout]"
+        fb.add_filter(f"[{prev}]trim=duration={audio_dur}{final_video_out}")
+
+        fb.set_output(final_video_out)
+        ctx["map_out"] = final_video_out
+        # ===================================================================
+        # FIM DA ALTERAÇÃO
+        # ===================================================================
+
         return ctx
 
 
