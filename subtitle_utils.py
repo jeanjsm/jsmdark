@@ -275,7 +275,7 @@ def generate_ass_file(
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Default,{font},{size},{color},&H000000FF&,{outline_color},&H64000000&,"
+        f"Style: Default,{font},{size},{color},&H00FFFFFF&,{outline_color},&H64000000&,"
         f"0,0,0,0,100,100,0,0,1,{outline},{shadow},{alignment},20,20,{margin_v},1\n"
         "\n[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
@@ -297,8 +297,20 @@ def generate_ass_file(
             # Escapa caracteres especiais para ASS
             text = text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
             text = text.replace("\n", r"\N")
+            text = text.upper()
             if subtitle_effect == "fade_in":
                 text = "{\\fad(1000,0)}" + text
+            elif subtitle_effect == "karaoke":
+                # Efeito karaoke: divide por palavras e aplica tag {\k}
+                words = text.split()
+                total_time = end - start
+                if len(words) > 0 and total_time > 0:
+                    dur_per_word = total_time / len(words)
+                    # {\k} espera centésimos de segundo
+                    karaoke_text = ""
+                    for w in words:
+                        karaoke_text += f"{{\\k{int(dur_per_word*100)}}}{w} "
+                    text = karaoke_text.strip()
             f.write(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,0,0,0,,{text}\n")
 
 

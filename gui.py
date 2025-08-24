@@ -505,7 +505,7 @@ class VideoGeneratorGUI(QMainWindow):
 
         # Efeito na legenda
         self.subtitle_effect = QComboBox()
-        self.subtitle_effect.addItems(["none", "fade_in", "fill_bar"])
+        self.subtitle_effect.addItems(["none", "fade_in", "fill_bar", "karaoke"])
         subtitle_layout.addRow("Efeito:", self.subtitle_effect)
 
         layout.addRow("", subtitle_group)
