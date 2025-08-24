@@ -520,8 +520,8 @@ class VideoGeneratorGUI(QMainWindow):
         style_layout.addRow("Cor do contorno:", self.subtitle_outline_color)
 
         self.subtitle_outline_width = QSpinBox()
-        self.subtitle_outline_width.setRange(0, 5)
-        self.subtitle_outline_width.setValue(2)
+        self.subtitle_outline_width.setRange(0, 10)
+        self.subtitle_outline_width.setValue(6)
         style_layout.addRow("Largura do contorno:", self.subtitle_outline_width)
 
         # Configurações de sombra

@@ -256,7 +256,7 @@ def generate_ass_file(
     outline_color: str = "&H00000000&",
     outline: int = 2,
     shadow: int = 1,
-    alignment: int = 2,               # 2=bottom-center, 8=top-center, etc.
+    alignment: int = 5,               # 2=bottom-center, 8=top-center, etc.
     playres_x: int = 1920,
     playres_y: int = 1080,
     margin_v: int = 40,
@@ -276,7 +276,7 @@ def generate_ass_file(
         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{font},{size},{color},&H00FFFFFF&,{outline_color},&H64000000&,"
-        f"0,0,0,0,100,100,0,0,1,{outline},{shadow},{alignment},20,20,{margin_v},1\n"
+        f"-1,0,0,0,100,100,0,0,1,{outline},{shadow},{alignment},20,20,{margin_v},1\n"
         "\n[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
