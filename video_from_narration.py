@@ -18,6 +18,7 @@ def create_video_from_narration(
     videos_folder: str,
     out_path: str = "output.mp4",
     seed: int | None = None,
+    shuffle: bool | None = True,
     fps: int = 30,
     width: int = 1920,
     height: int = 1080,
@@ -85,6 +86,7 @@ def create_video_from_narration(
         "videos_folder": videos_folder,
         "out_path": out_path,
         "seed": seed,
+        "shuffle": shuffle,
         "fps": fps,
         "width": width,
         "height": height,
@@ -145,6 +147,7 @@ if __name__ == "__main__":
     # parser.add_argument("--pasta_videos", default='D:/videos background/pexels/result2/', help="Pasta com os vídeos ou imagens de entrada")
     parser.add_argument("--saida", default="output.mp4", help="Arquivo de saída (default: output.mp4)")
     parser.add_argument("--seed", type=int, default=None, help="Seed para sorteio dos vídeos/imagens")
+    parser.add_argument("--shuffle", type=bool, default=None, help="Randomiza a ordem dos vídeos/imagens (default: True)")
     parser.add_argument("--fps", type=int, default=30, help="Frames por segundo do vídeo final")
     parser.add_argument("--width", type=int, default=854, help="Largura do vídeo final")
     parser.add_argument("--height", type=int, default=480, help="Altura do vídeo final")
@@ -217,6 +220,7 @@ if __name__ == "__main__":
         videos_folder=args.pasta_videos,
         out_path=args.saida,
         seed=args.seed,
+        shuffle=args.shuffle,
         fps=args.fps,
         width=args.width,
         height=args.height,

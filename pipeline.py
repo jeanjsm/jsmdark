@@ -71,6 +71,7 @@ class VideoBaseStage(PipelineStage):
         narration_path = ctx["narration_path"]
         videos_folder = ctx["videos_folder"]
         seed = ctx["seed"]
+        shuffle = ctx["shuffle"]
         fps = ctx["fps"]
         width = ctx["width"]
         height = ctx["height"]
@@ -98,14 +99,14 @@ class VideoBaseStage(PipelineStage):
                 raise FileNotFoundError(f"Nenhum vídeo em: {folder}")
             extra = (len(vids)-1)*1.5 if transition!="none" and len(vids)>1 else 0
             total = audio_dur + extra + safety_margin
-            segments = pick_segments_to_cover(total, vids, seed=seed)
+            segments = pick_segments_to_cover(total, vids, seed=seed, shuffle=shuffle)
         else:
             imgs = list_images(folder)
             if not imgs:
                 raise FileNotFoundError(f"Nenhuma imagem em: {folder}")
             extra = max(0, int(audio_dur/image_segment_duration)-1)*1.5 if transition!="none" else 0
             total = audio_dur + extra + safety_margin
-            segments = pick_image_segments_to_cover(total, imgs, image_segment_duration, seed=seed)
+            segments = pick_image_segments_to_cover(total, imgs, image_segment_duration, seed=seed, shuffle=shuffle)
 
         # Filtra segmentos curtos
         segments = [s for s in segments if s[1] > 0.01]

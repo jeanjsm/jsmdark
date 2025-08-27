@@ -156,6 +156,10 @@ class VideoGeneratorGUI(QMainWindow):
         self.seed.setSpecialValueText("Aleatório")
         layout.addRow("Seed:", self.seed)
 
+        self.shuffle = QCheckBox("Randomizar ordem dos vídeos/imagens")
+        self.shuffle.setChecked(True)
+        layout.addRow("Shuffle:", self.shuffle)
+
         # Opções de remoção de silêncio
         self.remove_silence = QCheckBox("Remover silêncio")
         self.remove_silence.setChecked(True)
@@ -642,6 +646,7 @@ class VideoGeneratorGUI(QMainWindow):
             'videos_folder': self.videos_folder_input.text(),
             'out_path': self.output_input.text(),
             'seed': None if self.seed.value() == -1 else self.seed.value(),
+            'shuffle': self.shuffle.isChecked(),
             'fps': self.fps.value(),
             'width': self.width.value(),
             'height': self.height.value(),
@@ -739,6 +744,7 @@ class VideoGeneratorGUI(QMainWindow):
             'videos_folder': self.videos_folder_input.text(),
             'out_path': self.output_input.text(),
             'seed': self.seed.value(),
+            'shuffle': self.shuffle.isChecked(),
             'fps': self.fps.value(),
             'width': self.width.value(),
             'height': self.height.value(),
@@ -825,6 +831,7 @@ class VideoGeneratorGUI(QMainWindow):
         self.videos_folder_input.setText(config.get('videos_folder', ''))
         self.output_input.setText(config.get('out_path', ''))
         self.seed.setValue(config.get('seed', -1))
+        self.shuffle.setChecked(config.get('shuffle', True))
         self.fps.setValue(config.get('fps', 30))
         self.width.setValue(config.get('width', 1920))
         self.height.setValue(config.get('height', 1080))
@@ -905,6 +912,7 @@ class VideoGeneratorGUI(QMainWindow):
         self.videos_folder_input.textChanged.connect(self.save_config)
         self.output_input.textChanged.connect(self.save_config)
         self.seed.valueChanged.connect(self.save_config)
+        self.shuffle.toggled.connect(self.save_config)
         self.fps.valueChanged.connect(self.save_config)
         self.width.valueChanged.connect(self.save_config)
         self.height.valueChanged.connect(self.save_config)
