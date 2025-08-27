@@ -498,15 +498,25 @@ class SubtitleStage(PipelineStage):
                 alignment = alignment_map.get(subtitle_position, 2)
 
                 # Converte cor para formato ASS (BGR)
-                color_ass = "&H00FFFFFF&"  # Branco padrão
-                if subtitle_color == "yellow":
-                    color_ass = "&H0000FFFF&"
-                elif subtitle_color == "red":
-                    color_ass = "&H000000FF&"
-                elif subtitle_color == "blue":
-                    color_ass = "&H00FF0000&"
+                color_ass_map = {
+                    "white": "&H00FFFFFF&",
+                    "yellow": "&H0000FFFF&",
+                    "red": "&H000000FF&",
+                    "blue": "&H00FF0000&",
+                    "green": "&H0000FF00&",
+                    "black": "&H00000000&",
+                    "cyan": "&H00FFFF00&",
+                    "magenta": "&H00FF00FF&",
+                    "gray": "&H00808080&",
+                    "orange": "&H0000A5FF&"
+                }
+                color_ass = color_ass_map.get(subtitle_color, "&H00FFFFFF&")
 
                 grouped = group_words_by_count(segments, words_per_subtitle)
+
+                # Converte cores de contorno e sombra para formato ASS
+                outline_color_ass = color_ass_map.get(ctx.get("subtitle_outline_color", "black"), "&H00000000&")
+
                 # Gera arquivo ASS
                 generate_ass_file(
                     grouped,
@@ -514,6 +524,9 @@ class SubtitleStage(PipelineStage):
                     font=subtitle_font,
                     size=subtitle_font_size,
                     color=color_ass,
+                    outline_color=outline_color_ass,
+                    outline=ctx.get("subtitle_outline_width", 2),
+                    shadow=ctx.get("subtitle_shadow_x", 2),
                     alignment=alignment,
                     playres_x=ctx.get("width", 1920),
                     playres_y=ctx.get("height", 1080),

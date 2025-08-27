@@ -458,6 +458,18 @@ class VideoGeneratorGUI(QMainWindow):
         self.enable_subtitles = QCheckBox("Habilitar legendas automáticas")
         layout.addRow("", self.enable_subtitles)
 
+        # Preset de legendas estilizadas
+        preset_group = QGroupBox("Presets Estilizados")
+        preset_layout = QFormLayout(preset_group)
+
+        self.subtitle_preset = QComboBox()
+        self.subtitle_preset.addItems(["personalizado", "neon", "glow", "shadow_bold", "outline_thick", "retro_3d", "minimal", "gaming", "cinema"])
+        self.subtitle_preset.setCurrentText("minimal")
+        self.subtitle_preset.currentTextChanged.connect(self.apply_subtitle_preset)
+        preset_layout.addRow("Preset:", self.subtitle_preset)
+
+        layout.addRow("", preset_group)
+
         # Grupo de configurações de legendas
         subtitle_group = QGroupBox("Configurações de Legendas")
         subtitle_layout = QFormLayout(subtitle_group)
@@ -906,6 +918,52 @@ class VideoGeneratorGUI(QMainWindow):
                     self.chroma_widgets[idx]["position"].setCurrentText(chroma_item.get("position", "bottom_center"))
                     self.chroma_widgets[idx]["start"].setValue(chroma_item.get("start", 30.0))
 
+    def apply_subtitle_preset(self, preset_name):
+        """Aplica configurações do preset selecionado aos campos da GUI."""
+        if preset_name == "personalizado":
+            return
+
+        from subtitle_utils import get_subtitle_preset
+        config = get_subtitle_preset(preset_name)
+
+        # Mapear cores ASS para cores simples da GUI
+        color_map = {
+            "&H00FFFFFF&": "white",
+            "&H00FF00FF&": "red",
+            "&H0000FFFF&": "yellow",
+            "&H00000000&": "black",
+            "&H0000FF00&": "green",
+            "&H00FF0000&": "blue"
+        }
+
+        # Aplicar configurações do preset
+        if "size" in config:
+            self.subtitle_font_size.setValue(config["size"])
+
+        if "color" in config:
+            gui_color = color_map.get(config["color"], "white")
+            self.subtitle_color.setCurrentText(gui_color)
+
+        if "outline_color" in config:
+            outline_color = color_map.get(config["outline_color"], "black")
+            self.subtitle_outline_color.setCurrentText(outline_color)
+
+        if "outline" in config:
+            self.subtitle_outline_width.setValue(config["outline"])
+
+        if "shadow" in config:
+            self.subtitle_shadow_x.setValue(config["shadow"])
+            self.subtitle_shadow_y.setValue(config["shadow"])
+
+        if "subtitle_effect" in config:
+            self.subtitle_effect.setCurrentText(config["subtitle_effect"])
+
+        # Posição baseada no alignment
+        if config.get("alignment") == 8:
+            self.subtitle_position.setCurrentText("top_center")
+        else:
+            self.subtitle_position.setCurrentText("bottom_center")
+
     def connect_change_events(self):
         # Conectar eventos de mudança para salvar configuração automaticamente
         self.narration_input.textChanged.connect(self.save_config)
@@ -958,6 +1016,7 @@ class VideoGeneratorGUI(QMainWindow):
         self.bg_music_input.textChanged.connect(self.save_config)
         self.bg_music_volume.valueChanged.connect(self.save_config)
         self.subtitle_effect.currentTextChanged.connect(self.save_config)
+        self.subtitle_preset.currentTextChanged.connect(self.save_config)
         self.ending_input.textChanged.connect(self.save_config)
 
 if __name__ == "__main__":

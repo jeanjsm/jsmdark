@@ -315,6 +315,126 @@ def generate_ass_file(
 
 
 # ------------------------------------------
+# Presets de legendas estilizadas (CapCut-style)
+# ------------------------------------------
+
+def get_subtitle_preset(preset_name: str) -> dict:
+    """Retorna configurações de estilo para presets populares do CapCut."""
+    presets = {
+        "neon": {
+            "font": "Arial Black",
+            "size": 48,
+            "color": "&H00FF00FF&",  # Rosa neon
+            "outline_color": "&H00FFFFFF&",  # Branco
+            "outline": 3,
+            "shadow": 0,
+            "alignment": 2,
+            "subtitle_effect": "glow"
+        },
+        "glow": {
+            "font": "Arial",
+            "size": 44,
+            "color": "&H00FFFFFF&",  # Branco
+            "outline_color": "&H0000FFFF&",  # Amarelo
+            "outline": 4,
+            "shadow": 2,
+            "alignment": 2,
+            "subtitle_effect": "glow"
+        },
+        "shadow_bold": {
+            "font": "Arial Black",
+            "size": 52,
+            "color": "&H00FFFFFF&",  # Branco
+            "outline_color": "&H00000000&",  # Preto
+            "outline": 2,
+            "shadow": 4,
+            "alignment": 2,
+            "subtitle_effect": "shadow"
+        },
+        "outline_thick": {
+            "font": "Impact",
+            "size": 56,
+            "color": "&H0000FFFF&",  # Amarelo
+            "outline_color": "&H00000000&",  # Preto
+            "outline": 6,
+            "shadow": 1,
+            "alignment": 2,
+            "subtitle_effect": "none"
+        },
+        "retro_3d": {
+            "font": "Arial Black",
+            "size": 48,
+            "color": "&H00FF8080&",  # Rosa claro
+            "outline_color": "&H00800080&",  # Roxo escuro
+            "outline": 3,
+            "shadow": 3,
+            "alignment": 2,
+            "subtitle_effect": "3d"
+        },
+        "minimal": {
+            "font": "Arial",
+            "size": 36,
+            "color": "&H00FFFFFF&",  # Branco
+            "outline_color": "&H80000000&",  # Preto semi-transparente
+            "outline": 1,
+            "shadow": 1,
+            "alignment": 2,
+            "subtitle_effect": "none"
+        },
+        "gaming": {
+            "font": "Arial Black",
+            "size": 50,
+            "color": "&H0000FF00&",  # Verde
+            "outline_color": "&H00000000&",  # Preto
+            "outline": 4,
+            "shadow": 2,
+            "alignment": 2,
+            "subtitle_effect": "gaming"
+        },
+        "cinema": {
+            "font": "Times New Roman",
+            "size": 40,
+            "color": "&H00FFFFFF&",  # Branco
+            "outline_color": "&H00000000&",  # Preto
+            "outline": 2,
+            "shadow": 2,
+            "alignment": 2,
+            "margin_v": 80,
+            "subtitle_effect": "fade_in"
+        }
+    }
+
+    return presets.get(preset_name, presets["minimal"])
+
+
+def generate_ass_file_with_preset(
+    segments: List[Tuple[float, float, str]],
+    out_path: str,
+    preset: str = "minimal",
+    playres_x: int = 1920,
+    playres_y: int = 1080,
+) -> None:
+    """Gera arquivo ASS usando preset estilizado."""
+    config = get_subtitle_preset(preset)
+
+    generate_ass_file(
+        segments=segments,
+        out_path=out_path,
+        font=config["font"],
+        size=config["size"],
+        color=config["color"],
+        outline_color=config["outline_color"],
+        outline=config["outline"],
+        shadow=config["shadow"],
+        alignment=config["alignment"],
+        playres_x=playres_x,
+        playres_y=playres_y,
+        margin_v=config.get("margin_v", 40),
+        subtitle_effect=config["subtitle_effect"]
+    )
+
+
+# ------------------------------------------
 # Utilitário de formatação de tempo SRT
 # ------------------------------------------
 
