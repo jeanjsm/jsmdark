@@ -287,11 +287,17 @@ class VideoGeneratorGUI(QMainWindow):
 
         # Gerar nome de saída automaticamente baseado no arquivo de narração
         narration_path = Path(self.narration_input.text())
-        output_dir = Path("output_videos")
-        output_dir.mkdir(exist_ok=True)
+
+        # Usar o mesmo diretório base do campo de saída configurado
+        if self.output_input.text():
+            output_base = Path(self.output_input.text()).parent
+        else:
+            output_base = Path("output_videos")
+
+        output_base.mkdir(exist_ok=True)
 
         output_filename = f"{narration_path.stem}.mp4"
-        output_path = output_dir / output_filename
+        output_path = output_base / output_filename
 
         # Verificar se já existe na fila
         for item in self.queue_items:
@@ -1016,7 +1022,7 @@ class VideoGeneratorGUI(QMainWindow):
         images_layout = QFormLayout(images_group)
 
         self.image_segment_duration = QDoubleSpinBox()
-        self.image_segment_duration.setRange(0.5, 15.0)
+        self.image_segment_duration.setRange(0.5, 60.0)
         self.image_segment_duration.setValue(6.0)
         self.image_segment_duration.setSingleStep(0.5)
         images_layout.addRow("Duração por imagem (s):", self.image_segment_duration)

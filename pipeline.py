@@ -123,14 +123,10 @@ class VideoBaseStage(PipelineStage):
         inputs = ["-y", "-hide_banner", "-loglevel", "error", "-fflags", "+genpts", "-i", str(narration)]
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             concat_file = f.name
-            base = folder.resolve()
             for src, take in segments:
                 path = cached.get(src, src)
-                try:
-                    rel = Path(path).resolve().relative_to(base)
-                    path = str(folder/rel).replace("\\", "/")
-                except ValueError:
-                    path = path.replace("\\", "/")
+                # Usa o caminho absoluto do arquivo cached diretamente
+                path = str(Path(path).resolve()).replace("\\", "/")
                 f.write(f"file '{path}'\n")
                 f.write(f"duration {take:.3f}\n")
         inputs += ["-f", "concat", "-safe", "0", "-i", concat_file]
@@ -592,7 +588,12 @@ class ImageCacheStage(PipelineStage):
 
         # Configurações
         out_path = ctx["out_path"]
-        cache_dir = Path(out_path).parent / "cache"
+        parent = Path(out_path).parent
+        # Evita duplicação se já estamos dentro de cache
+        if parent.name == "cache":
+            cache_dir = parent
+        else:
+            cache_dir = parent / "cache"
         cache_dir.mkdir(exist_ok=True)
 
         videos_folder = ctx["videos_folder"]
