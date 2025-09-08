@@ -144,8 +144,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gera vídeo a partir de narração e clipes ou imagens.")
     parser.add_argument("--narracao", default='./arquivos_teste/narracao.mp3', help="Caminho para o arquivo de narração (áudio)")
     parser.add_argument("--pasta_videos", default='./arquivos_teste/1/', help="Pasta com os vídeos ou imagens de entrada")
-    # parser.add_argument("--pasta_videos", default='D:/videos background/pexels/result2/', help="Pasta com os vídeos ou imagens de entrada")
-    parser.add_argument("--saida", default="output.mp4", help="Arquivo de saída (default: output.mp4)")
+    parser.add_argument("--pasta_destino", default="output_videos/", help="Pasta de destino para o vídeo gerado")
     parser.add_argument("--seed", type=int, default=None, help="Seed para sorteio dos vídeos/imagens")
     parser.add_argument("--shuffle", type=bool, default=None, help="Randomiza a ordem dos vídeos/imagens (default: True)")
     parser.add_argument("--fps", type=int, default=30, help="Frames por segundo do vídeo final")
@@ -215,10 +214,15 @@ if __name__ == "__main__":
     parser.add_argument("--subtitle_effect", choices=["none", "fade_in", "fill_bar"], default="none", help="Efeito na legenda: none, fade_in ou fill_bar")
 
     args = parser.parse_args()
+
+    # Gera nome do arquivo de saída igual ao da narração, mas com extensão .mp4
+    narracao_nome = Path(args.narracao).stem + ".mp4"
+    out_path = str(Path(args.pasta_destino) / narracao_nome)
+
     create_video_from_narration(
         narration_path=args.narracao,
         videos_folder=args.pasta_videos,
-        out_path=args.saida,
+        out_path=out_path,
         seed=args.seed,
         shuffle=args.shuffle,
         fps=args.fps,

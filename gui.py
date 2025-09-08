@@ -253,7 +253,8 @@ class VideoGeneratorGUI(QMainWindow):
         self.output_input = QLineEdit()
         self.output_input.setPlaceholderText("Opcional: nome personalizado (senão usará nome da narração)")
         self.output_button = QPushButton("Procurar")
-        self.output_button.clicked.connect(lambda: self.save_file(self.output_input, "Vídeo (*.mp4)"))
+        # Troca para selecionar apenas a pasta de destino do vídeo
+        self.output_button.clicked.connect(lambda: self.browse_folder(self.output_input))
         self.output_layout.addWidget(self.output_input)
         self.output_layout.addWidget(self.output_button)
         layout.addRow("Arquivo de saída:", self.output_layout)
@@ -285,19 +286,15 @@ class VideoGeneratorGUI(QMainWindow):
             QMessageBox.warning(self, "Atenção", "Selecione uma pasta de vídeos/imagens!")
             return
 
-        # Gerar nome de saída automaticamente baseado no arquivo de narração
+        if not self.output_input.text():
+            QMessageBox.warning(self, "Atenção", "Selecione a pasta de destino!")
+            return
+
         narration_path = Path(self.narration_input.text())
-
-        # Usar o mesmo diretório base do campo de saída configurado
-        if self.output_input.text():
-            output_base = Path(self.output_input.text()).parent
-        else:
-            output_base = Path("output_videos")
-
-        output_base.mkdir(exist_ok=True)
-
+        output_folder = Path(self.output_input.text())
+        output_folder.mkdir(exist_ok=True)
         output_filename = f"{narration_path.stem}.mp4"
-        output_path = output_base / output_filename
+        output_path = output_folder / output_filename
 
         # Verificar se já existe na fila
         for item in self.queue_items:
@@ -305,7 +302,6 @@ class VideoGeneratorGUI(QMainWindow):
                 QMessageBox.warning(self, "Atenção", "Este arquivo de narração já está na fila!")
                 return
 
-        # Criar item da fila
         queue_item = QueueItem(
             narration_path=self.narration_input.text(),
             output_path=str(output_path)
@@ -315,7 +311,6 @@ class VideoGeneratorGUI(QMainWindow):
         self.update_queue_display()
 
         self.log_message(f"Adicionado à fila: {narration_path.name} -> {output_filename}")
-
         QMessageBox.information(self, "Sucesso", f"Item adicionado à fila!\nSaída: {output_filename}")
 
     def update_queue_display(self):
@@ -571,84 +566,19 @@ class VideoGeneratorGUI(QMainWindow):
             return
 
         if not self.output_input.text():
-            QMessageBox.warning(self, "Atenção", "Selecione um arquivo de saída!")
+            QMessageBox.warning(self, "Atenção", "Selecione a pasta de destino!")
             return
 
+        # Monta o caminho completo do arquivo de saída
+        narration_path = Path(self.narration_input.text())
+        output_folder = Path(self.output_input.text())
+        output_folder.mkdir(exist_ok=True)
+        output_filename = f"{narration_path.stem}.mp4"
+        out_path = str(output_folder / output_filename)
+
         # Preparar parâmetros
-        params = {
-            'narration_path': self.narration_input.text(),
-            'videos_folder': self.videos_folder_input.text(),
-            'out_path': self.output_input.text(),
-            'seed': None if self.seed.value() == -1 else self.seed.value(),
-            'shuffle': self.shuffle.isChecked(),
-            'fps': self.fps.value(),
-            'width': self.width.value(),
-            'height': self.height.value(),
-            'crf': self.crf.value(),
-            'preset': self.preset.currentText(),
-            'video_mode': self.video_mode.currentText(),
-            'image_segment_duration': self.image_segment_duration.value(),
-            'overlay': self.overlay_input.text() if self.overlay_input.text() else None,
-            'overlay_opacity': self.overlay_opacity.value(),
-            'logo': self.logo_input.text() if self.logo_input.text() else None,
-            'logo_scale': self.logo_scale.value(),
-            'logo_x': self.logo_x.value(),
-            'logo_y': self.logo_y.value(),
-            'logo_position': self.logo_position.currentText(),
-            'transition_type': self.transition_type.currentText(),
-            'enable_subtitles': self.enable_subtitles.isChecked(),
-            'subtitle_font_size': self.subtitle_font_size.value(),
-            'subtitle_color': self.subtitle_color.currentText(),
-            'subtitle_position': self.subtitle_position.currentText(),
-            'subtitle_font': self.subtitle_font_input.text() if self.subtitle_font_input.text() else None,
-            'subtitle_outline_color': self.subtitle_outline_color.currentText(),
-            'subtitle_outline_width': self.subtitle_outline_width.value(),
-            'subtitle_shadow_color': self.subtitle_shadow_color.currentText(),
-            'subtitle_shadow_x': self.subtitle_shadow_x.value(),
-            'subtitle_shadow_y': self.subtitle_shadow_y.value(),
-            'words_per_subtitle': self.words_per_subtitle.value(),
-            'vosk_model_path': self.vosk_model_input.text(),
-            'enable_ken_burns': self.enable_ken_burns.isChecked(),
-            'cinematic_preset': None if self.cinematic_preset.currentText() == "nenhum" else self.cinematic_preset.currentText(),
-            'custom_lut_path': self.lut_input.text() if self.lut_input.text() else None,
-            'enable_vignette': self.enable_vignette.isChecked(),
-            'vignette_intensity': self.vignette_intensity.value(),
-            'enable_curves': self.enable_curves.isChecked(),
-            'custom_curves': self.custom_curves.text() if self.custom_curves.text() else None,
-            'remove_silence': self.remove_silence.isChecked(),
-            'silence_threshold': self.silence_threshold.value(),
-            'silence_duration': self.silence_duration.value(),
-            'encoder': self.encoder.currentText(),
-            'performance_profile': self.performance_profile.currentText(),
-            'threads': self.threads.value(),
-            'gpu_quality': self.gpu_quality.value(),
-            'resolution_preset': self.resolution_preset.currentText(),
-            'background_music': self.bg_music_input.text() if self.bg_music_input.text() else None,
-            'background_music_volume': self.bg_music_volume.value(),
-            'subtitle_effect': self.subtitle_effect.currentText(),
-            'ending_video_path': self.ending_input.text() if self.ending_input.text() else None,
-        }
-
-        # Adiciona lista de chromas
-        chroma_list = []
-        for chroma_data in self.chroma_widgets:
-            # Pula itens excluídos
-            if chroma_data is None:
-                continue
-
-            # Somente adiciona o chroma se um caminho estiver definido
-            if chroma_data["input"].text():
-                chroma_item = {
-                    "path": chroma_data["input"].text(),
-                    "scale": chroma_data["scale"].value(),
-                    "position": chroma_data["position"].currentText(),
-                    "start": chroma_data["start"].value()
-                }
-                chroma_list.append(chroma_item)
-
-        # Adiciona a lista de chromas ao parâmetro se não estiver vazia
-        if chroma_list:
-            params["chroma_list"] = chroma_list
+        params = self.get_current_params()
+        params['out_path'] = out_path
 
         # Desabilitar botão e mostrar progresso
         self.generate_button.setEnabled(False)
@@ -1407,9 +1337,8 @@ class VideoGeneratorGUI(QMainWindow):
             line_edit.setText(folder_path)
 
     def save_file(self, line_edit, filter_str):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Salvar arquivo", "", filter_str)
-        if file_path:
-            line_edit.setText(file_path)
+        # Função mantida para compatibilidade, mas não usada para saída de vídeo
+        pass
 
     def update_resolution_preset(self, preset):
         if preset == "horizontal_1080p":
