@@ -529,6 +529,7 @@ class VideoGeneratorGUI(QMainWindow):
             'background_music_volume': self.bg_music_volume.value(),
             'subtitle_effect': self.subtitle_effect.currentText(),
             'ending_video_path': self.ending_input.text() if self.ending_input.text() else None,
+            'opening_video_paths': self.opening_video_paths if self.opening_video_paths else None,
         }
 
         # Adiciona lista de chromas
@@ -673,10 +674,6 @@ class VideoGeneratorGUI(QMainWindow):
                     "start": chroma_data["start"].value()
                 }
                 chroma_list.append(chroma_item)
-
-        # Adiciona a lista de chromas à configuração se não estiver vazia
-        if chroma_list:
-            config["chroma_list"] = chroma_list
 
         # Salvar em config.json silenciosamente
         with open("config.json", "w") as config_file:
@@ -1017,6 +1014,34 @@ class VideoGeneratorGUI(QMainWindow):
         self.ending_layout.addWidget(self.ending_input)
         self.ending_layout.addWidget(self.ending_button)
         layout.addRow("Vídeo de encerramento:", self.ending_layout)
+
+        # Vídeos de abertura (opcional)
+        opening_group = QGroupBox("Vídeos de Abertura")
+        opening_layout = QVBoxLayout(opening_group)
+
+        # Lista de vídeos de abertura
+        self.opening_list = QListWidget()
+        self.opening_list.setMinimumHeight(100)
+        opening_layout.addWidget(self.opening_list)
+
+        # Botões para gerenciar vídeos de abertura
+        opening_buttons_layout = QHBoxLayout()
+        self.add_opening_button = QPushButton("Adicionar")
+        self.add_opening_button.clicked.connect(self.add_opening_video)
+        self.remove_opening_button = QPushButton("Remover")
+        self.remove_opening_button.clicked.connect(self.remove_opening_video)
+        self.clear_openings_button = QPushButton("Limpar")
+        self.clear_openings_button.clicked.connect(self.clear_opening_videos)
+
+        opening_buttons_layout.addWidget(self.add_opening_button)
+        opening_buttons_layout.addWidget(self.remove_opening_button)
+        opening_buttons_layout.addWidget(self.clear_openings_button)
+        opening_layout.addLayout(opening_buttons_layout)
+
+        # Lista interna para armazenar caminhos dos vídeos
+        self.opening_video_paths = []
+
+        layout.addRow("", opening_group)
 
     def setup_overlay_tab(self, tab):
         layout = QFormLayout(tab)
@@ -1368,6 +1393,58 @@ class VideoGeneratorGUI(QMainWindow):
         elif preset == "square_1080p":
             self.width.setValue(1080)
             self.height.setValue(1080)
+
+    def add_opening_video(self):
+        """Adiciona vídeo de abertura à lista"""
+        file_path, _ = QFileDialog.getOpenFileName(self, "Selecionar vídeo de abertura", "", "Vídeos (*.mp4 *.mov *.avi)")
+        if file_path:
+            # Adiciona à lista interna
+            self.opening_video_paths.append(file_path)
+
+            # Atualiza exibição
+            self.update_opening_video_display()
+
+            self.log_message(f"Vídeo de abertura adicionado: {file_path}")
+
+    def remove_opening_video(self):
+        """Remove vídeo de abertura selecionado da lista"""
+        current_row = self.opening_list.currentRow()
+
+        if current_row < 0 or current_row >= len(self.opening_video_paths):
+            QMessageBox.warning(self, "Atenção", "Selecione um vídeo de abertura para remover!")
+            return
+
+        # Remove da lista interna
+        self.opening_video_paths.pop(current_row)
+
+        # Atualiza exibição
+        self.update_opening_video_display()
+
+        self.log_message("Vídeo de abertura removido")
+
+    def clear_opening_videos(self):
+        """Limpa todos os vídeos de abertura da lista"""
+        self.opening_video_paths.clear()
+        self.opening_list.clear()
+        self.log_message("Todos os vídeos de abertura foram removidos")
+
+    def update_opening_video_display(self):
+        """Atualiza a exibição da lista de vídeos de abertura"""
+        self.opening_list.clear()
+
+        for path in self.opening_video_paths:
+            self.opening_list.addItem(Path(path).name)
+
+    def closeEvent(self, event):
+        """Evento de fechamento da janela"""
+        # Perguntar antes de fechar
+        reply = QMessageBox.question(self, "Confirmar", "Tem certeza que deseja sair?",
+                                   QMessageBox.Yes | QMessageBox.No)
+
+        if reply == QMessageBox.Yes:
+            event.accept()
+        else:
+            event.ignore()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

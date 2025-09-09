@@ -1079,6 +1079,101 @@ class EndingStage(PipelineStage):
         return ctx
 
 
+class OpeningStage(PipelineStage):
+    """Estágio que adiciona vídeos de abertura no início do vídeo principal"""
+
+    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        opening_video_paths = ctx.get("opening_video_paths", [])
+        if not opening_video_paths:
+            return ctx
+
+        print(f"Adicionando {len(opening_video_paths)} vídeo(s) de abertura")
+
+        # Obter o filter builder e outros parâmetros do contexto
+        fb = ctx["filter_builder"]
+        map_out = ctx.get("map_out", "[vout]")
+        audio_duration = ctx["audio_duration"]
+        width = ctx["width"]
+        height = ctx["height"]
+
+        # Calcular a duração total dos vídeos de abertura
+        opening_total_duration = 0
+        opening_inputs = []
+        opening_labels = []
+
+        # Adicionar os vídeos de abertura aos inputs
+        inputs = ctx["inputs"]
+        for i, path in enumerate(opening_video_paths):
+            if not os.path.exists(path):
+                print(f"Aviso: Arquivo de abertura não encontrado: {path}")
+                continue
+
+            # Adicionar aos inputs
+            video_idx = sum(1 for x in inputs if x == "-i")
+            inputs.extend(["-i", str(path)])
+
+            # Calcular duração do vídeo de abertura
+            from subprocess import check_output, PIPE
+            import json
+            ffprobe_cmd = [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "json",
+                path
+            ]
+            result = check_output(ffprobe_cmd, stderr=PIPE).decode('utf-8')
+            duration = float(json.loads(result)["format"]["duration"])
+
+            # Registrar informações para processamento
+            opening_inputs.append((video_idx, duration))
+            opening_total_duration += duration
+
+            # Criar label para o vídeo de abertura com escala e padding para corresponder à resolução principal
+            in_lbl = f"{video_idx}:v"
+            out_lbl = f"opening_{i}"
+            # Assegurar que o vídeo de abertura tenha a mesma resolução do vídeo principal
+            fb.add_filter(
+                f"[{in_lbl}]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setpts=PTS-STARTPTS[{out_lbl}]"
+            )
+            opening_labels.append(out_lbl)
+
+        # Atualizar os inputs no contexto
+        ctx["inputs"] = inputs
+
+        if not opening_labels:
+            return ctx
+
+        # Concatenar os vídeos de abertura
+        if len(opening_labels) > 1:
+            concat_lbls = "".join(f"[{l}]" for l in opening_labels)
+            fb.add_filter(f"{concat_lbls}concat=n={len(opening_labels)}:v=1:a=0[opening_concat]")
+            opening_output = "opening_concat"
+        else:
+            opening_output = opening_labels[0]
+
+        # Remover o map_out da string se estiver dentro de colchetes
+        map_out_clean = map_out.strip("[]")
+
+        # Calcular nova duração do vídeo principal para ajustar ao tempo da narração
+        adjusted_duration = max(0.1, audio_duration - opening_total_duration)
+
+        # Ajustar o vídeo principal para a nova duração
+        fb.add_filter(f"[{map_out_clean}]trim=duration={adjusted_duration}[main_adjusted]")
+
+        # Concatenar abertura + vídeo principal
+        fb.add_filter(f"[{opening_output}][main_adjusted]concat=n=2:v=1:a=0[vout_with_opening]")
+
+        # Atualizar o mapa de saída
+        ctx["map_out"] = "[vout_with_opening]"
+
+        # Armazenar a duração total dos vídeos de abertura no contexto
+        ctx["opening_total_duration"] = opening_total_duration
+
+        return ctx
+
+
 class MediaPipeline:
     """Pipeline principal para processamento de mídia"""
 

@@ -8,7 +8,7 @@ from video_utils import list_videos, pick_segments_to_cover, list_images, pick_i
 from ffmpeg_utils import run
 from pipeline import MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage, TransitionStage, \
     SubtitleStage, CinematicStage, ImageCacheStage, EncoderStage, OutputStage, BackgroundMusicStage, EndingStage, \
-    MediaCacheStage
+    MediaCacheStage, OpeningStage
 import json
 import argparse
 
@@ -70,6 +70,7 @@ def create_video_from_narration(
     background_music_volume: float = 0.2,
     subtitle_effect: str = "none",
     ending_video_path: str = None,
+    opening_video_paths: TList[str] = None,
 ):
     # Remove silêncio da narração se habilitado
     if remove_silence:
@@ -80,7 +81,21 @@ def create_video_from_narration(
             stop_duration=silence_duration
         )
 
-    stages = [EncoderStage(), MediaCacheStage(), VideoBaseStage(), TransitionStage(), OverlayStage(), LogoStage(), ChromaStage(), CinematicStage(), SubtitleStage(), BackgroundMusicStage(), EndingStage(), OutputStage()]
+    stages = [
+        EncoderStage(),
+        MediaCacheStage(),
+        VideoBaseStage(),
+        TransitionStage(),
+        OpeningStage(),
+        OverlayStage(),
+        LogoStage(),
+        ChromaStage(),
+        CinematicStage(),
+        SubtitleStage(),
+        BackgroundMusicStage(),
+        EndingStage(),
+        OutputStage()
+    ]
     ctx = {
         "narration_path": narration_path,
         "videos_folder": videos_folder,
@@ -135,6 +150,7 @@ def create_video_from_narration(
         "background_music_volume": background_music_volume,
         "subtitle_effect": subtitle_effect,
         "ending_video_path": ending_video_path,
+        "opening_video_paths": opening_video_paths if opening_video_paths else [],
     }
     pipeline = MediaPipeline(stages)
     return pipeline.run(ctx)
@@ -213,6 +229,10 @@ if __name__ == "__main__":
     parser.add_argument("--background_music_volume", type=float, default=0.2, help="Volume da trilha de fundo (0.0 a 1.0)")
     parser.add_argument("--subtitle_effect", choices=["none", "fade_in", "fill_bar"], default="none", help="Efeito na legenda: none, fade_in ou fill_bar")
 
+    # Parâmetros para vídeos de encerramento e abertura
+    parser.add_argument("--ending_video_path", default=None, help="Arquivo de vídeo para encerramento (mp4)")
+    parser.add_argument("--opening_video_paths", nargs='+', default=None, help="Lista de arquivos de vídeo para abertura (mp4)")
+
     args = parser.parse_args()
 
     # Gera nome do arquivo de saída igual ao da narração, mas com extensão .mp4
@@ -276,4 +296,5 @@ if __name__ == "__main__":
         background_music_volume=args.background_music_volume,
         subtitle_effect=args.subtitle_effect,
         ending_video_path=args.ending_video_path,
+        opening_video_paths=args.opening_video_paths,
     )
