@@ -6,10 +6,10 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QSpinBox, QDoubleSpinBox,
     QComboBox, QCheckBox, QTabWidget, QFileDialog, QFormLayout,
     QGroupBox, QSlider, QProgressBar, QMessageBox, QListWidget,
-    QListWidgetItem, QTextEdit, QSplitter
+    QListWidgetItem, QTextEdit, QSplitter, QScrollArea, QFrame
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QTimer, QMutex
-from PySide6.QtGui import QIcon, QFont, QColor, QTextCursor
+from PySide6.QtGui import QIcon, QFont, QColor, QTextCursor, QPalette, QPixmap
 
 import sys
 import os
@@ -39,6 +39,13 @@ class ProcessVideoThread(QThread):
 
     def run(self):
         try:
+            # Adicionar callback de progresso
+            def progress_callback(percent):
+                self.progress.emit(percent)
+
+            # Adicionar callback ao dicionário de parâmetros
+            self.params['progress_callback'] = progress_callback
+
             # Chamar a função de processamento
             result = create_video_from_narration(**self.params)
             self.finished.emit(True, f"Vídeo gerado com sucesso: {self.params['out_path']}")
@@ -70,6 +77,13 @@ class QueueWorkerThread(QThread):
             params['narration_path'] = item.narration_path
             params['out_path'] = item.output_path
 
+            # Adicionar callback de progresso
+            current_index = i
+            def progress_callback(percent):
+                self.item_progress.emit(current_index, percent)
+
+            params['progress_callback'] = progress_callback
+
             try:
                 result = create_video_from_narration(**params)
                 self.item_finished.emit(i, True, f"Concluído: {item.output_path}")
@@ -87,6 +101,9 @@ class VideoGeneratorGUI(QMainWindow):
         self.setWindowTitle("Gerador de Vídeos")
         self.setMinimumSize(1200, 800)
 
+        # Aplicar estilo visual moderno
+        self.apply_modern_style()
+
         # Inicializar variáveis da fila
         self.queue_items = []
         self.queue_worker = None
@@ -95,19 +112,34 @@ class VideoGeneratorGUI(QMainWindow):
         # Layout principal com splitter
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
-        main_layout = QHBoxLayout(self.central_widget)
+        main_layout = QVBoxLayout(self.central_widget)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
 
         # Splitter para dividir configurações e fila
         splitter = QSplitter(Qt.Horizontal)
-        main_layout.addWidget(splitter)
+        splitter.setChildrenCollapsible(False)
+        main_layout.addWidget(splitter, 1)
 
         # Widget esquerdo - Configurações
         config_widget = QWidget()
         config_layout = QVBoxLayout(config_widget)
+        config_layout.setContentsMargins(0, 0, 0, 0)
+        config_layout.setSpacing(10)
+
+        # Envolve as configurações em um QScrollArea para melhor responsividade
+        config_scroll = QScrollArea()
+        config_scroll.setWidgetResizable(True)
+        config_scroll.setFrameShape(QFrame.NoFrame)
+
+        config_content = QWidget()
+        config_content_layout = QVBoxLayout(config_content)
+        config_content_layout.setContentsMargins(0, 0, 0, 0)
+        config_content_layout.setSpacing(10)
 
         # Criação das abas
         tabs = QTabWidget()
-        config_layout.addWidget(tabs)
+        config_content_layout.addWidget(tabs)
 
         # Criação das diferentes abas
         basic_tab = QWidget()
@@ -131,19 +163,27 @@ class VideoGeneratorGUI(QMainWindow):
 
         # Área de botões para configurações
         config_button_layout = QHBoxLayout()
+        config_button_layout.setSpacing(10)
+
         self.add_to_queue_button = QPushButton("Adicionar à Fila")
+        self.add_to_queue_button.setMinimumHeight(40)
         self.add_to_queue_button.clicked.connect(self.add_to_queue)
 
         self.generate_button = QPushButton("Gerar Vídeo Único")
+        self.generate_button.setMinimumHeight(40)
         self.generate_button.clicked.connect(self.generate_video)
 
         self.save_config_button = QPushButton("Salvar Configuração")
+        self.save_config_button.setMinimumHeight(40)
         self.save_config_button.clicked.connect(self.save_config)
 
         config_button_layout.addWidget(self.add_to_queue_button)
         config_button_layout.addWidget(self.generate_button)
         config_button_layout.addWidget(self.save_config_button)
-        config_layout.addLayout(config_button_layout)
+        config_content_layout.addLayout(config_button_layout)
+
+        config_scroll.setWidget(config_content)
+        config_layout.addWidget(config_scroll)
 
         # Widget direito - Fila de processamento
         queue_widget = QWidget()
@@ -155,15 +195,141 @@ class VideoGeneratorGUI(QMainWindow):
         splitter.setSizes([700, 500])
 
         # Barra de progresso global
+        progress_frame = QFrame()
+        progress_frame.setFrameShape(QFrame.StyledPanel)
+        progress_frame.setFrameShadow(QFrame.Sunken)
+        progress_layout = QVBoxLayout(progress_frame)
+        progress_layout.setContentsMargins(10, 10, 10, 10)
+
+        progress_label = QLabel("Progresso Global")
+        progress_label.setAlignment(Qt.AlignCenter)
+        progress_layout.addWidget(progress_label)
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
-        main_layout.addWidget(self.progress_bar)
+        self.progress_bar.setMinimumHeight(25)
+        progress_layout.addWidget(self.progress_bar)
+
+        main_layout.addWidget(progress_frame)
 
         # Carregar configurações salvas
         self.load_config()
 
         # Conectar eventos para salvar config automaticamente quando os campos mudam
         self.connect_change_events()
+
+    def apply_modern_style(self):
+        """Aplica estilos modernos aos componentes da interface"""
+        # Estilo geral
+        style = """
+        QMainWindow, QWidget {
+            background-color: #f5f5f5;
+            color: #333333;
+        }
+        
+        QTabWidget::pane {
+            border: 1px solid #cccccc;
+            border-radius: 4px;
+            background-color: white;
+        }
+        
+        QTabBar::tab {
+            background-color: #e0e0e0;
+            padding: 8px 16px;
+            margin: 2px 2px 0px 0px;
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
+        }
+        
+        QTabBar::tab:selected {
+            background-color: white;
+            border: 1px solid #cccccc;
+            border-bottom: none;
+        }
+        
+        QGroupBox {
+            font-weight: bold;
+            border: 1px solid #cccccc;
+            border-radius: 4px;
+            margin-top: 12px;
+            padding-top: 10px;
+            background-color: white;
+        }
+        
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            subcontrol-position: top left;
+            left: 10px;
+            padding: 0px 5px;
+            background-color: white;
+        }
+        
+        QPushButton {
+            background-color: #2196f3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            font-weight: bold;
+        }
+        
+        QPushButton:hover {
+            background-color: #0d8aee;
+        }
+        
+        QPushButton:pressed {
+            background-color: #0c7cd5;
+        }
+        
+        QPushButton:disabled {
+            background-color: #bbdefb;
+        }
+        
+        QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+            border: 1px solid #cccccc;
+            border-radius: 3px;
+            padding: 4px;
+            background-color: white;
+            selection-background-color: #2196f3;
+        }
+        
+        QProgressBar {
+            border: 1px solid #cccccc;
+            border-radius: 3px;
+            background-color: #e0e0e0;
+            text-align: center;
+        }
+        
+        QProgressBar::chunk {
+            background-color: #2196f3;
+            width: 1px;
+        }
+        
+        QCheckBox::indicator:checked {
+            background-color: #2196f3;
+            border: 1px solid #2196f3;
+        }
+        
+        QListWidget {
+            border: 1px solid #cccccc;
+            border-radius: 3px;
+            padding: 2px;
+            background-color: white;
+        }
+        
+        QListWidget::item:selected {
+            background-color: #bbdefb;
+            color: #333333;
+        }
+        
+        QTextEdit {
+            border: 1px solid #cccccc;
+            border-radius: 3px;
+            padding: 4px;
+            background-color: white;
+        }
+        """
+        self.setStyleSheet(style)
 
     def setup_queue_widget(self, widget):
         """Configura o widget da fila de processamento"""
@@ -587,6 +753,7 @@ class VideoGeneratorGUI(QMainWindow):
 
         # Iniciar thread de processamento
         self.thread = ProcessVideoThread(params)
+        self.thread.progress.connect(self.update_progress)
         self.thread.finished.connect(self.on_process_finished)
         self.thread.start()
 
@@ -1197,7 +1364,7 @@ class VideoGeneratorGUI(QMainWindow):
         self.chroma_list_layout.addWidget(chroma_item_group)
 
     def remove_chroma_widget(self, group_widget, idx):
-        # Remove o widget do layout e da lista
+        # Removes the widget from the layout and the list
         self.chroma_list_layout.removeWidget(group_widget)
         group_widget.deleteLater()
 
@@ -1445,6 +1612,10 @@ class VideoGeneratorGUI(QMainWindow):
             event.accept()
         else:
             event.ignore()
+
+    def update_progress(self, value):
+        """Atualiza o valor da barra de progresso global"""
+        self.progress_bar.setValue(value)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

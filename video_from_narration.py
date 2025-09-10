@@ -71,6 +71,7 @@ def create_video_from_narration(
     subtitle_effect: str = "none",
     ending_video_path: str = None,
     opening_video_paths: TList[str] = None,
+    progress_callback: Callable[[int], None] = None,
 ):
     # Remove silêncio da narração se habilitado
     if remove_silence:
@@ -151,6 +152,7 @@ def create_video_from_narration(
         "subtitle_effect": subtitle_effect,
         "ending_video_path": ending_video_path,
         "opening_video_paths": opening_video_paths if opening_video_paths else [],
+        "progress_callback": progress_callback,
     }
     pipeline = MediaPipeline(stages)
     return pipeline.run(ctx)

@@ -1181,6 +1181,16 @@ class MediaPipeline:
         self.stages = stages
 
     def run(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
-        for stage in self.stages:
+        total_stages = len(self.stages)
+        progress_callback = ctx.get("progress_callback")
+
+        for i, stage in enumerate(self.stages):
             ctx = stage(ctx)
+
+            # Atualiza o progresso se o callback estiver disponível
+            if progress_callback:
+                # Calcula a porcentagem com base na etapa atual
+                progress = int((i + 1) / total_stages * 100)
+                progress_callback(progress)
+
         return ctx
