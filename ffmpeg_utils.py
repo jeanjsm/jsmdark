@@ -51,3 +51,34 @@ def run(cmd: List[str]) -> subprocess.CompletedProcess:
         print("\n[FFmpeg stderr]")
         print(e.stderr)
         raise
+
+def apply_camera_shake(input_path: str, output_path: str, intensity: float = 0.03, frequency: int = 30, duration: float = None) -> None:
+    """Aplica efeito Camera Shake estilo CapCut usando FFmpeg."""
+    # Aumentamos a intensidade para tornar o efeito mais visível
+    intensity = max(intensity, 0.01) * 1.5  # Amplifica o efeito para ser mais perceptível
+
+    # Aplicamos um zoom maior para compensar as bordas pretas
+    scale = 1.05  # Escala maior para evitar bordas pretas
+
+    # Expressões para movimento horizontal e vertical
+    if duration is not None and duration > 0:
+        h_expr = f"if(lt(t,{duration}),sin(t*{frequency}*PI)*{intensity}*w,0)"
+        v_expr = f"if(lt(t,{duration}),sin((t+0.25)*{frequency}*PI)*{intensity}*h,0)"
+    else:
+        h_expr = f"sin(t*{frequency}*PI)*{intensity}*w"
+        v_expr = f"sin((t+0.25)*{frequency}*PI)*{intensity}*h"
+
+    # Filtro completo: zoom + translate com expressões corrigidas
+    shake_filter = f"scale=iw*{scale}:ih*{scale},setpts=PTS-STARTPTS"
+    shake_filter += f",translate={h_expr}:{v_expr}"
+
+    cmd = [
+        get_ffmpeg_path(), '-y', '-i', input_path,
+        '-vf', shake_filter,
+        '-c:a', 'copy',
+        output_path
+    ]
+
+    # Executa o comando
+    print(f"[DEBUG] Aplicando camera shake com intensidade={intensity}, frequência={frequency}")
+    run(cmd)

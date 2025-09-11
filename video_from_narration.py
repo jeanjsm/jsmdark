@@ -72,6 +72,7 @@ def create_video_from_narration(
     ending_video_path: str = None,
     opening_video_paths: TList[str] = None,
     progress_callback: Callable[[int], None] = None,
+    camera_shake_config: Dict[str, Any] = None,
 ):
     # Remove silêncio da narração se habilitado
     if remove_silence:
@@ -153,6 +154,7 @@ def create_video_from_narration(
         "ending_video_path": ending_video_path,
         "opening_video_paths": opening_video_paths if opening_video_paths else [],
         "progress_callback": progress_callback,
+        "camera_shake_config": camera_shake_config,
     }
     pipeline = MediaPipeline(stages)
     return pipeline.run(ctx)

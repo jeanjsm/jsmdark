@@ -663,8 +663,8 @@ class ImageCacheStage(PipelineStage):
         ctx["cached_images"] = cached_videos
         return ctx
 
-    def _prerender_image(self, img_path, output_path, duration, fps, width, height, encoder_config, cache_dir):
-        """Renderiza uma imagem em vídeo curto sem efeitos"""
+    def _prerender_image(self, img_path, output_path, duration, fps, width, height, encoder_config, cache_dir, camera_shake_config=None):
+        """Renderiza uma imagem em vídeo curto sem efeitos. Aplica Camera Shake se configurado"""
 
         # Salva comando em arquivo para reuso
         cmd_file = cache_dir / f"cmd_{output_path.stem}.txt"
@@ -719,6 +719,15 @@ class ImageCacheStage(PipelineStage):
             f.write("\n")
 
         run(cmd)
+        # Aplica Camera Shake se configurado
+        if camera_shake_config and camera_shake_config.get('enabled', False):
+            from ffmpeg_utils import apply_camera_shake
+            temp_output = str(output_path) + '.shake.mp4'
+            apply_camera_shake(str(output_path), temp_output,
+                              intensity=camera_shake_config.get('intensity', 0.03),
+                              frequency=camera_shake_config.get('frequency', 30),
+                              duration=camera_shake_config.get('duration'))
+            os.replace(temp_output, str(output_path))
 
 class MediaCacheStage(PipelineStage):
     """Pré-renderiza imagens e vídeos em cache para resolução uniforme."""
