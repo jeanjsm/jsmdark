@@ -100,19 +100,18 @@ class AppController(QObject):
         self.log_message(f"Adicionado à fila: {narration_path.name}")
 
     def save_config(self):
+        # Atualiza modelo com valores da UI
         self.update_model_from_ui()
+        # Sincroniza width/height do VideoTab
+        self.model.width = self.view.video_tab.width.value()
+        self.model.height = self.view.video_tab.height.value()
+        self.model.fps = self.view.video_tab.fps.value()
         self.model.save()
         self.log_message("✅ Configurações salvas em config.json")
 
     def on_close_window(self, event):
-        reply = QMessageBox.question(self.view, "Sair", "Deseja salvar as alterações?",
-                                     QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Save)
-        if reply == QMessageBox.Save:
-            self.save_config(); event.accept()
-        elif reply == QMessageBox.Discard:
-            event.accept()
-        else:
-            event.ignore()
+        self.save_config()
+        event.accept()
 
     # --- Métodos de atualização e gerenciamento (sem alterações na lógica interna) ---
     def update_model_from_ui(self):

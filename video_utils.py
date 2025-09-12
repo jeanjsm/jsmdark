@@ -56,8 +56,8 @@ def pick_image_segments_to_cover(audio_dur: float, images: List[Path], image_seg
     while total < audio_dur:
         if not pool:
             pool = images[:]
-        if shuffle:
-            random.shuffle(pool)
+            if shuffle:
+                random.shuffle(pool)
         for img in list(pool):
             remaining = audio_dur - total
             if remaining <= 0.05:
@@ -65,7 +65,5 @@ def pick_image_segments_to_cover(audio_dur: float, images: List[Path], image_seg
             take = min(image_segment_duration, remaining)
             chosen.append((img, take))
             total += take
-            pool.remove(img)
-            if total >= audio_dur - 1e-3:
-                break
+        pool = []
     return chosen

@@ -51,7 +51,6 @@ def create_video_from_narration(
     subtitle_shadow_y: int = 2,
     words_per_subtitle: int = 1,
     vosk_model_path: str = "_internal/vosk_models/vosk-model-pt",
-    enable_ken_burns: bool = False,
     cinematic_preset: str = None,
     custom_lut_path: str = None,
     enable_vignette: bool = False,
@@ -72,7 +71,6 @@ def create_video_from_narration(
     ending_video_path: str = None,
     opening_video_paths: TList[str] = None,
     progress_callback: Callable[[int], None] = None,
-    camera_shake_config: Dict[str, Any] = None,
 ):
     # Remove silêncio da narração se habilitado
     if remove_silence:
@@ -136,7 +134,6 @@ def create_video_from_narration(
         "subtitle_shadow_y": subtitle_shadow_y,
         "words_per_subtitle": words_per_subtitle,
         "vosk_model_path": vosk_model_path,
-        "enable_ken_burns": enable_ken_burns,
         "cinematic_preset": cinematic_preset,
         "custom_lut_path": custom_lut_path,
         "enable_vignette": enable_vignette,
@@ -154,7 +151,6 @@ def create_video_from_narration(
         "ending_video_path": ending_video_path,
         "opening_video_paths": opening_video_paths if opening_video_paths else [],
         "progress_callback": progress_callback,
-        "camera_shake_config": camera_shake_config,
     }
     pipeline = MediaPipeline(stages)
     return pipeline.run(ctx)
@@ -281,7 +277,6 @@ if __name__ == "__main__":
         subtitle_shadow_y=args.subtitle_shadow_y,
         words_per_subtitle=args.words_per_subtitle,
         vosk_model_path=args.vosk_model_path,
-        enable_ken_burns=args.enable_ken_burns,
         cinematic_preset=args.cinematic_preset,
         custom_lut_path=args.custom_lut_path,
         enable_vignette=args.enable_vignette,

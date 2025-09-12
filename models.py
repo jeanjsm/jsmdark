@@ -27,14 +27,6 @@ class ChromaConfig:
 
 
 @dataclass
-class CameraShakeConfig:
-    enabled: bool = False
-    intensity: float = 0.03
-    frequency: int = 30
-    duration: float = 0.0
-
-
-@dataclass
 class ConfigModel:
     """
     Modelo de dados que corresponde 1:1 aos parâmetros da função original.
@@ -86,7 +78,6 @@ class ConfigModel:
     subtitle_effect: str = "none"
 
     # Efeitos cinematográficos
-    enable_ken_burns: bool = False
     cinematic_preset: str = "nenhum"
     custom_lut_path: str = ""
     enable_vignette: bool = False
@@ -104,9 +95,6 @@ class ConfigModel:
     # Abertura e Encerramento
     opening_video_paths: List[str] = field(default_factory=list)
     ending_video_path: str = ""
-
-    # Configuração de Camera Shake (nível superior)
-    camera_shake_config: CameraShakeConfig = field(default_factory=CameraShakeConfig)
 
     def to_dict(self):
         # Converte o dataclass para um dicionário, incluindo os aninhados
@@ -133,8 +121,6 @@ class ConfigModel:
                 # Recria os dataclasses aninhados a partir dos dicionários
                 if 'chroma_list' in data:
                     data['chroma_list'] = [ChromaConfig(**c) for c in data.get('chroma_list', [])]
-                if 'camera_shake_config' in data:
-                    data['camera_shake_config'] = CameraShakeConfig(**data.get('camera_shake_config', {}))
 
                 # Filtra chaves inválidas para evitar erros ao desempacotar
                 valid_keys = cls.__annotations__.keys()

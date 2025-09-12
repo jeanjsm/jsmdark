@@ -128,10 +128,8 @@ class VideoTab(QWidget):
         self.image_segment_duration.setRange(0.5, 60.0)
         self.transition_type = QComboBox();
         self.transition_type.addItems(["none", "fade", "random"])
-        self.enable_ken_burns = QCheckBox("Habilitar efeito Ken Burns")
         img_layout.addRow("Duração por imagem (s):", self.image_segment_duration)
         img_layout.addRow("Transição:", self.transition_type)
-        img_layout.addRow(self.enable_ken_burns)
         layout.addWidget(img_group)
 
         # Efeitos Visuais
@@ -188,6 +186,21 @@ class VideoTab(QWidget):
         layout.addWidget(open_end_group)
 
         layout.addStretch()
+
+        # Atualização automática de width/height ao mudar o preset de resolução
+        self.resolution_preset.currentTextChanged.connect(self._update_resolution)
+        self._update_resolution(self.resolution_preset.currentText())
+
+    def _update_resolution(self, preset):
+        presets = {
+            "horizontal_1080p": (1920, 1080),
+            "horizontal_720p": (1280, 720),
+            "vertical_1080p": (1080, 1920),
+            "custom": (self.width.value(), self.height.value())
+        }
+        w, h = presets.get(preset, (1920, 1080))
+        self.width.setValue(w)
+        self.height.setValue(h)
 
 
 class ChromaItemWidget(QGroupBox):
@@ -340,24 +353,6 @@ class SubtitleTab(QWidget):
         style_layout.addRow("Sombra X:", self.subtitle_shadow_x)
         style_layout.addRow("Sombra Y:", self.subtitle_shadow_y)
         layout.addWidget(style_group)
-
-        # Camera Shake
-        shake_group = QGroupBox("Efeito Camera Shake")
-        shake_layout = QFormLayout(shake_group)
-        self.camera_shake_enabled = QCheckBox("Ativar Camera Shake estilo CapCut")
-        self.camera_shake_intensity = QDoubleSpinBox();
-        self.camera_shake_intensity.setRange(0.01, 0.2);
-        self.camera_shake_intensity.setSingleStep(0.01)
-        self.camera_shake_frequency = QSpinBox();
-        self.camera_shake_frequency.setRange(1, 60)
-        self.camera_shake_duration = QDoubleSpinBox();
-        self.camera_shake_duration.setRange(0, 600);
-        self.camera_shake_duration.setSingleStep(0.1)
-        shake_layout.addRow(self.camera_shake_enabled)
-        shake_layout.addRow("Intensidade:", self.camera_shake_intensity)
-        shake_layout.addRow("Frequência:", self.camera_shake_frequency)
-        shake_layout.addRow("Duração (0=todo vídeo):", self.camera_shake_duration)
-        layout.addWidget(shake_group)
 
         # CORREÇÃO: addStretch() agora funciona no QVBoxLayout
         layout.addStretch()
