@@ -7,24 +7,28 @@ from ui_main_window import VideoGeneratorGUI
 from app_controller import AppController
 
 
-def main():
-    """Ponto de entrada principal da aplicação."""
+def main() -> None:
+    """Main entry point for the application.
+
+    Sets up the QApplication, loads the model, creates the view and controller,
+    connects signals, updates the UI, and starts the event loop.
+    """
     app = QApplication(sys.argv)
 
-    # 1. Carrega o modelo de dados
+    # 1. Load the data model
     model = ConfigModel.load()
 
-    # 2. Cria a View (Janela Principal)
+    # 2. Create the main window (View)
     view = VideoGeneratorGUI()
 
-    # 3. Cria o Controller, conectando Model e View
+    # 3. Create the Controller, connecting Model and View
     controller = AppController(view, model)
 
-    # 4. Conecta os sinais e carrega os dados na UI
+    # 4. Connect signals and load data into the UI
     controller.connect_signals()
     controller.update_ui_from_model()
 
-    # 5. Exibe a janela e inicia o loop da aplicação
+    # 5. Show the window and start the application loop
     view.show()
     sys.exit(app.exec())
 

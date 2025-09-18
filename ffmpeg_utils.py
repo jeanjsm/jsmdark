@@ -1,44 +1,65 @@
 import subprocess
 import tempfile
 import os
-from typing import List
+import logging
+from typing import List, Optional
 from pathlib import Path
 
+# Constants
+FILTER_COMPLEX_LENGTH_LIMIT = 8000
+CAMERA_SHAKE_INTENSITY_MIN = 0.01
+CAMERA_SHAKE_INTENSITY_MULTIPLIER = 1.5
+
+class FFmpegError(Exception):
+    """Custom exception for FFmpeg command failures."""
+    pass
+
+
 def get_ffmpeg_path() -> str:
-    """Retorna o caminho para o executável FFmpeg local"""
+    """Return the path to the local FFmpeg executable if available, otherwise fallback to system FFmpeg.
+
+    Returns:
+        str: Path to FFmpeg executable.
+    """
     current_dir = Path(__file__).parent
     ffmpeg_path = current_dir / "_internal" / "ffmpeg" / "bin" / "ffmpeg.exe"
 
     if ffmpeg_path.exists():
         return str(ffmpeg_path)
 
-    # Fallback para FFmpeg no PATH se o local não existir
     return "ffmpeg"
 
+
 def run(cmd: List[str]) -> subprocess.CompletedProcess:
+    """Run an FFmpeg command, handling long filter_complex arguments and errors.
+
+    Args:
+        cmd (List[str]): Command arguments for FFmpeg.
+
+    Returns:
+        subprocess.CompletedProcess: The result of the FFmpeg command.
+
+    Raises:
+        FFmpegError: If the FFmpeg command fails.
+    """
     try:
-        # Substitui "ffmpeg" pelo caminho completo se necessário
         if cmd[0] == "ffmpeg":
             cmd[0] = get_ffmpeg_path()
 
-        # Debug: mostra o comando que será executado
-        print(f"[DEBUG] Executando comando: {cmd[0]} {' '.join(cmd[1:])}")
+        logging.debug(f"Executing command: {cmd[0]} {' '.join(cmd[1:])}")
 
-        # Verifica se há filter_complex muito longo
         filter_complex_idx = None
         for i, arg in enumerate(cmd):
             if arg == "-filter_complex" and i + 1 < len(cmd):
                 filter_complex_idx = i + 1
                 break
 
-        # Se filter_complex é muito longo, usa arquivo temporário
-        if filter_complex_idx and len(cmd[filter_complex_idx]) > 8000:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        if filter_complex_idx and len(cmd[filter_complex_idx]) > FILTER_COMPLEX_LENGTH_LIMIT:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
                 f.write(cmd[filter_complex_idx])
                 temp_file = f.name
 
             try:
-                # Substitui o filtro complexo pelo arquivo
                 new_cmd = cmd[:filter_complex_idx-1] + ["-filter_complex_script", temp_file] + cmd[filter_complex_idx+1:]
                 return subprocess.run(new_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
             finally:
@@ -46,21 +67,32 @@ def run(cmd: List[str]) -> subprocess.CompletedProcess:
         else:
             return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
     except subprocess.CalledProcessError as e:
-        print("\n[FFmpeg command failed]")
-        print("Command:", " ".join(cmd[:10]) + "..." if len(cmd) > 10 else " ".join(cmd))
-        print("\n[FFmpeg stderr]")
-        print(e.stderr)
-        raise
+        logging.error("[FFmpeg command failed]")
+        logging.error(f"Command: {' '.join(cmd[:10]) + '...' if len(cmd) > 10 else ' '.join(cmd)}")
+        logging.error(f"[FFmpeg stderr]\n{e.stderr}")
+        raise FFmpegError("FFmpeg command failed") from e
 
-def apply_camera_shake(input_path: str, output_path: str, intensity: float = 0.03, frequency: int = 30, duration: float = None) -> None:
-    """Aplica efeito Camera Shake estilo CapCut usando FFmpeg."""
-    # Aumentamos a intensidade para tornar o efeito mais visível
-    intensity = max(intensity, 0.01) * 1.5  # Amplifica o efeito para ser mais perceptível
 
-    # Aplicamos um zoom maior para compensar as bordas pretas
-    scale = 1.05  # Escala maior para evitar bordas pretas
+def apply_camera_shake(
+    input_path: str,
+    output_path: str,
+    intensity: float = 0.03,
+    frequency: int = 30,
+    duration: Optional[float] = None
+) -> None:
+    """Apply CapCut-style camera shake effect using FFmpeg.
 
-    # Expressões para movimento horizontal e vertical
+    Args:
+        input_path (str): Path to input video.
+        output_path (str): Path to output video.
+        intensity (float, optional): Shake intensity. Defaults to 0.03.
+        frequency (int, optional): Shake frequency. Defaults to 30.
+        duration (float, optional): Duration of effect. Defaults to None.
+    """
+    intensity = max(intensity, CAMERA_SHAKE_INTENSITY_MIN) * CAMERA_SHAKE_INTENSITY_MULTIPLIER
+
+    scale = 1.05
+
     if duration is not None and duration > 0:
         h_expr = f"if(lt(t,{duration}),sin(t*{frequency}*PI)*{intensity}*w,0)"
         v_expr = f"if(lt(t,{duration}),sin((t+0.25)*{frequency}*PI)*{intensity}*h,0)"
@@ -68,7 +100,6 @@ def apply_camera_shake(input_path: str, output_path: str, intensity: float = 0.0
         h_expr = f"sin(t*{frequency}*PI)*{intensity}*w"
         v_expr = f"sin((t+0.25)*{frequency}*PI)*{intensity}*h"
 
-    # Filtro completo: zoom + translate com expressões corrigidas
     shake_filter = f"scale=iw*{scale}:ih*{scale},setpts=PTS-STARTPTS"
     shake_filter += f",translate={h_expr}:{v_expr}"
 
@@ -79,6 +110,5 @@ def apply_camera_shake(input_path: str, output_path: str, intensity: float = 0.0
         output_path
     ]
 
-    # Executa o comando
-    print(f"[DEBUG] Aplicando camera shake com intensidade={intensity}, frequência={frequency}")
+    logging.info(f"Applying camera shake with intensity={intensity}, frequency={frequency}")
     run(cmd)

@@ -1,3 +1,4 @@
+import logging
 # app_controller.py
 from dataclasses import asdict
 from pathlib import Path
@@ -21,7 +22,23 @@ from ui_tabs import FileBrowseWidget, ChromaItemWidget
 
 
 class AppController(QObject):
-    def __init__(self, view: VideoGeneratorGUI, model: ConfigModel):
+    """Controller for the main application logic, connecting the view and model.
+
+    Attributes:
+        view (VideoGeneratorGUI): The main window view.
+        model (ConfigModel): The data model.
+        queue_items (list[QueueItem]): List of items in the processing queue.
+        queue_worker: Worker thread for queue processing.
+        is_processing_queue (bool): Whether the queue is being processed.
+        chroma_widgets (list[ChromaItemWidget]): List of chroma widgets.
+    """
+    def __init__(self, view: VideoGeneratorGUI, model: ConfigModel) -> None:
+        """Initialize the AppController.
+
+        Args:
+            view (VideoGeneratorGUI): The main window view.
+            model (ConfigModel): The data model.
+        """
         super().__init__()
         self.view = view
         self.model = model
@@ -30,7 +47,8 @@ class AppController(QObject):
         self.is_processing_queue = False
         self.chroma_widgets: list[ChromaItemWidget] = []
 
-    def connect_signals(self):
+    def connect_signals(self) -> None:
+        """Connects UI signals to controller methods."""
         self.view.generate_button.clicked.connect(self.generate_single_video)
         self.view.add_to_queue_button.clicked.connect(self.add_to_queue)
         self.view.save_config_button.clicked.connect(self.save_config)
@@ -47,7 +65,6 @@ class AppController(QObject):
         self.view.overlay_tab.add_chroma_btn.clicked.connect(
             lambda: self._add_chroma_widget()
         )
-
         # Conecta o evento de alteração do preset de legendas
         self.view.subtitle_tab.subtitle_preset.currentTextChanged.connect(
             self._on_subtitle_preset_change
@@ -55,11 +72,11 @@ class AppController(QObject):
 
         self.view.closeEvent = self.on_close_window
 
-    def _on_subtitle_preset_change(self, preset):
-        """
-        Manipulador de eventos para mudança do preset de legendas.
-        Se o preset for personalizado, não faz nada.
-        Caso contrário, atualiza os campos com os valores do preset.
+    def _on_subtitle_preset_change(self, preset: str) -> None:
+        """Event handler for subtitle preset change.
+
+        Args:
+            preset (str): The selected subtitle preset.
         """
         if preset == "personalizado":
             return

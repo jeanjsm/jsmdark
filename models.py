@@ -2,28 +2,50 @@
 import json
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
-from typing import List, Dict
+from typing import List, Dict, Optional
+
+# Constants
+DEFAULT_STATUS = "waiting"
+DEFAULT_PROGRESS = 0
+DEFAULT_ERROR_MESSAGE = ""
+DEFAULT_CHROMA_SCALE = 0.3
+DEFAULT_CHROMA_POSITION = "bottom_center"
+DEFAULT_CHROMA_START = 30.0
 
 
 # --- CLASSE QueueItem RESTAURADA ---
 @dataclass
 class QueueItem:
-    """Representa um único item na fila de processamento."""
+    """Represents a single item in the processing queue.
+
+    Attributes:
+        narration_path (str): Path to the narration file.
+        output_path (str): Path to the output file.
+        status (str): Processing status (waiting, processing, completed, error).
+        progress (int): Progress percentage.
+        error_message (str): Error message if any.
+    """
     narration_path: str
     output_path: str
-    status: str = "waiting"  # waiting, processing, completed, error
-    progress: int = 0
-    error_message: str = ""
+    status: str = DEFAULT_STATUS  # waiting, processing, completed, error
+    progress: int = DEFAULT_PROGRESS
+    error_message: str = DEFAULT_ERROR_MESSAGE
 
-
-# ------------------------------------
 
 @dataclass
 class ChromaConfig:
+    """Configuration for chroma overlay.
+
+    Attributes:
+        path (str): Path to chroma file.
+        scale (float): Scale factor for chroma.
+        position (str): Position of chroma overlay.
+        start (float): Start time for chroma effect.
+    """
     path: str = ""
-    scale: float = 0.3
-    position: str = "bottom_center"
-    start: float = 30.0
+    scale: float = DEFAULT_CHROMA_SCALE
+    position: str = DEFAULT_CHROMA_POSITION
+    start: float = DEFAULT_CHROMA_START
 
 
 @dataclass
@@ -35,7 +57,7 @@ class ConfigModel:
     narration_path: str = ""
     videos_folder: str = ""
     output_folder: str = ""  # Usado pela UI, mas não passado diretamente para a função
-    seed: int | None = None
+    seed: Optional[int] = None
     shuffle: bool = True
     video_mode: str = "videos"
     image_segment_duration: float = 6.0

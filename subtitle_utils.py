@@ -1,12 +1,22 @@
 import json
 import wave
 import subprocess
+import logging
 from pathlib import Path
 from typing import List, Tuple
 import unicodedata
 
 import vosk
 from ffmpeg_utils import get_ffmpeg_path
+
+# Constants
+AUDIO_SAMPLE_RATE = 16000
+AUDIO_CHANNELS = 1
+
+
+class SubtitleError(Exception):
+    """Custom exception for subtitle processing errors."""
+    pass
 
 
 # -----------------------------
@@ -15,19 +25,26 @@ from ffmpeg_utils import get_ffmpeg_path
 
 
 def normalize_text(s: str) -> str:
-    """
-    Normaliza o texto para NFC e remove caracteres de controle invisíveis
-    (mantém quebras de linha).
+    """Normalize text to NFC and remove invisible control characters (keeps newlines).
+
+    Args:
+        s (str): Input string.
+
+    Returns:
+        str: Normalized string.
     """
     s = unicodedata.normalize("NFC", s)
     return "".join(ch for ch in s if ch == "\n" or ch >= " ")
 
 
 def ff_escape(s: str) -> str:
-    """
-    Escapa os caracteres especiais para uso seguro no drawtext.
-    Isso cobre barra invertida, aspas simples, dois-pontos, colchetes,
-    porcento e vírgula, que frequentemente quebram o parser do FFmpeg.
+    """Escape special characters for safe use in FFmpeg drawtext.
+
+    Args:
+        s (str): Input string.
+
+    Returns:
+        str: Escaped string.
     """
     s = s.replace("\\", "\\\\")
     s = s.replace("'", r"\'")
@@ -45,7 +62,15 @@ def ff_escape(s: str) -> str:
 
 
 def extract_audio_for_transcription(video_path: str, output_path: str) -> None:
-    """Extrai áudio do vídeo em formato WAV mono 16kHz para o Vosk (mais enxuto e performático)."""
+    """Extract audio from video as mono WAV 16kHz for Vosk transcription.
+
+    Args:
+        video_path (str): Path to input video.
+        output_path (str): Path to output WAV file.
+
+    Raises:
+        SubtitleError: If extraction fails.
+    """
     cmd = [
         get_ffmpeg_path(),
         "-y",
@@ -56,15 +81,18 @@ def extract_audio_for_transcription(video_path: str, output_path: str) -> None:
         "-i",
         video_path,
         "-ar",
-        "16000",
+        str(AUDIO_SAMPLE_RATE),
         "-ac",
-        "1",
+        str(AUDIO_CHANNELS),
         "-f",
         "wav",
         output_path,
     ]
-    # Não use capture_output=True para evitar buffers gigantes desnecessários
-    subprocess.run(cmd, check=True)
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to extract audio for transcription: {e.stderr}")
+        raise SubtitleError("Audio extraction failed") from e
 
 
 # ------------------------------------------

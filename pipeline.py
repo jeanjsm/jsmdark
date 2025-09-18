@@ -1,3 +1,4 @@
+import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, Any, List as TList, Optional
@@ -14,21 +15,40 @@ from ffmpeg_utils import run, get_ffmpeg_path
 
 
 class FilterBuilder:
-    """Centralizador de construção de filtros complexos do FFmpeg"""
+    """Centraliza a construção de filtros complexos do FFmpeg.
 
-    def __init__(self):
-        self.filters = []
-        self.current_output = None
-        self.video_duration = 0
-        self.audio_duration = 0
-        self.used_labels = set()
+    Atributos:
+        filters (list[str]): Lista de strings de filtro.
+        current_output (Optional[str]): Rótulo de saída atual.
+        video_duration (float): Duração do vídeo.
+        audio_duration (float): Duração do áudio.
+        used_labels (set): Conjunto de rótulos de saída usados.
+    """
 
-    def add_filter(self, filter_str: str):
-        """Adiciona um filtro à cadeia"""
+    def __init__(self) -> None:
+        self.filters: TList[str] = []
+        self.current_output: Optional[str] = None
+        self.video_duration: float = 0
+        self.audio_duration: float = 0
+        self.used_labels: set = set()
+
+    def add_filter(self, filter_str: str) -> None:
+        """Adiciona um filtro à cadeia.
+
+        Args:
+            filter_str (str): String de filtro do FFmpeg.
+        """
         self.filters.append(filter_str)
 
-    def set_output(self, output_label: str):
-        """Define label único e registra uso"""
+    def set_output(self, output_label: str) -> str:
+        """Define um rótulo de saída único e registra seu uso.
+
+        Args:
+            output_label (str): Rótulo de saída desejado.
+
+        Returns:
+            str: Rótulo de saída único.
+        """
         if output_label in self.used_labels:
             base_label = output_label.strip('[]')
             counter = 1
@@ -41,20 +61,29 @@ class FilterBuilder:
         return output_label
 
     def get_filter_complex(self) -> str:
-        """Retorna o filter_complex completo"""
+        """Obtém a string filter_complex completa.
+
+        Returns:
+            str: String filter_complex concatenada.
+        """
         return ";".join(self.filters) if self.filters else ""
 
     def save_to_file(self) -> str:
-        """Salva o filter_complex em arquivo temporário e retorna o caminho"""
+        """Salva o filter_complex em um arquivo temporário e retorna seu caminho.
+
+        Returns:
+            str: Caminho para o arquivo filter_complex temporário.
+        """
         filter_complex = self.get_filter_complex()
-        with tempfile.NamedTemporaryFile(mode='w', suffix='_filter.txt', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='_filter.txt', delete=False, encoding='utf-8') as f:
             f.write(filter_complex)
             return f.name
 
-    def clear(self):
-        """Limpa todos os filtros"""
+    def clear(self) -> None:
+        """Limpa todos os filtros e redefine o estado."""
         self.filters = []
         self.current_output = None
+        self.used_labels.clear()
 
 
 class PipelineStage(ABC):

@@ -1,160 +1,220 @@
-# video_from_narration.py
-# Cria um vídeo a partir de uma narração, sorteando clipes de uma pasta e cortando apenas o último.
-# Saída: 1920x1080, 30fps, H.264, áudio da narração.
+"""
+video_from_narration.py
+
+Generates a video from a narration audio file, randomly selecting clips or images from a folder and assembling them into a final video.
+Output: 1920x1080, 30fps, H.264, narration audio.
+"""
+import argparse
+import json
+import logging
 from pathlib import Path
-from typing import Callable, Dict, Any, List as TList
+from typing import Callable, Dict, Any, List as TList, Optional
+
 from audio_utils import duration_seconds
 from video_utils import list_videos, pick_segments_to_cover, list_images, pick_image_segments_to_cover
 from ffmpeg_utils import run
-from pipeline import MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage, TransitionStage, \
-    SubtitleStage, CinematicStage, ImageCacheStage, EncoderStage, OutputStage, BackgroundMusicStage, EndingStage, \
-    MediaCacheStage, OpeningStage
-import json
-import argparse
+from pipeline import (
+    MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage, TransitionStage,
+    SubtitleStage, CinematicStage, ImageCacheStage, EncoderStage, OutputStage, BackgroundMusicStage,
+    EndingStage, MediaCacheStage, OpeningStage
+)
 
+# Named constants for magic numbers
+DEFAULT_FPS = 30
+DEFAULT_WIDTH = 1920
+DEFAULT_HEIGHT = 1080
+DEFAULT_CRF = 18
+DEFAULT_PRESET = "medium"
+DEFAULT_IMAGE_SEGMENT_DURATION = 2.0
+DEFAULT_OVERLAY_OPACITY = 1.0
+DEFAULT_LOGO_SCALE = 0.15
+DEFAULT_LOGO_X = 20
+DEFAULT_LOGO_Y = 20
+DEFAULT_LOGO_POSITION = "top_right"
+DEFAULT_CHROMA_SCALE = 0.5
+DEFAULT_CHROMA_POSITION = "bottom_right"
+DEFAULT_CHROMA_START = 0.0
+DEFAULT_TRANSITION_TYPE = "none"
+DEFAULT_SUBTITLE_FONT_SIZE = 24
+DEFAULT_SUBTITLE_COLOR = "white"
+DEFAULT_SUBTITLE_POSITION = "bottom_center"
+DEFAULT_SUBTITLE_OUTLINE_COLOR = "black"
+DEFAULT_SUBTITLE_OUTLINE_WIDTH = 2
+DEFAULT_SUBTITLE_SHADOW_COLOR = "black"
+DEFAULT_SUBTITLE_SHADOW_X = 2
+DEFAULT_SUBTITLE_SHADOW_Y = 2
+DEFAULT_WORDS_PER_SUBTITLE = 1
+DEFAULT_VOSK_MODEL_PATH = "_internal/vosk_models/vosk-model-pt"
+DEFAULT_VIGNETTE_INTENSITY = 1.0
+DEFAULT_ENCODER = "libx264"
+DEFAULT_PERFORMANCE_PROFILE = "quality"
+DEFAULT_THREADS = 0
+DEFAULT_GPU_QUALITY = 18
+DEFAULT_RESOLUTION_PRESET = "horizontal_1080p"
+DEFAULT_BACKGROUND_MUSIC_VOLUME = 0.2
+DEFAULT_SUBTITLE_EFFECT = "none"
+
+class VideoFromNarrationError(Exception):
+    """Custom exception for video generation errors."""
+    pass
 
 def create_video_from_narration(
     narration_path: str,
     videos_folder: str,
     out_path: str = "output.mp4",
-    seed: int | None = None,
-    shuffle: bool | None = True,
-    fps: int = 30,
-    width: int = 1920,
-    height: int = 1080,
-    crf: int = 18,
-    preset: str = "medium",
+    seed: Optional[int] = None,
+    shuffle: Optional[bool] = True,
+    fps: int = DEFAULT_FPS,
+    width: int = DEFAULT_WIDTH,
+    height: int = DEFAULT_HEIGHT,
+    crf: int = DEFAULT_CRF,
+    preset: str = DEFAULT_PRESET,
     video_mode: str = "videos",
-    image_segment_duration: float = 2.0,
-    overlay: str | None = None,
-    overlay_opacity: float = 1.0,
-    logo: str | None = None,
-    logo_scale: float = 0.15,
-    logo_x: int = 20,
-    logo_y: int = 20,
-    logo_position: str = "top_right",
-    chroma: str | None = None,
-    chroma_scale: float = 0.5,
-    chroma_position: str = "bottom_right",
-    chroma_start: float = 0.0,
-    chroma_list: TList[Dict[str, Any]] | None = None,
-    transition_type: str = "none",
+    image_segment_duration: float = DEFAULT_IMAGE_SEGMENT_DURATION,
+    overlay: Optional[str] = None,
+    overlay_opacity: float = DEFAULT_OVERLAY_OPACITY,
+    logo: Optional[str] = None,
+    logo_scale: float = DEFAULT_LOGO_SCALE,
+    logo_x: int = DEFAULT_LOGO_X,
+    logo_y: int = DEFAULT_LOGO_Y,
+    logo_position: str = DEFAULT_LOGO_POSITION,
+    chroma: Optional[str] = None,
+    chroma_scale: float = DEFAULT_CHROMA_SCALE,
+    chroma_position: str = DEFAULT_CHROMA_POSITION,
+    chroma_start: float = DEFAULT_CHROMA_START,
+    chroma_list: Optional[TList[Dict[str, Any]]] = None,
+    transition_type: str = DEFAULT_TRANSITION_TYPE,
     enable_subtitles: bool = False,
-    subtitle_font_size: int = 24,
-    subtitle_color: str = "white",
-    subtitle_position: str = "bottom_center",
-    subtitle_font: str = None,
-    subtitle_outline_color: str = "black",
-    subtitle_outline_width: int = 2,
-    subtitle_shadow_color: str = "black",
-    subtitle_shadow_x: int = 2,
-    subtitle_shadow_y: int = 2,
-    words_per_subtitle: int = 1,
-    vosk_model_path: str = "_internal/vosk_models/vosk-model-pt",
-    cinematic_preset: str = None,
-    custom_lut_path: str = None,
+    subtitle_font_size: int = DEFAULT_SUBTITLE_FONT_SIZE,
+    subtitle_color: str = DEFAULT_SUBTITLE_COLOR,
+    subtitle_position: str = DEFAULT_SUBTITLE_POSITION,
+    subtitle_font: Optional[str] = None,
+    subtitle_outline_color: str = DEFAULT_SUBTITLE_OUTLINE_COLOR,
+    subtitle_outline_width: int = DEFAULT_SUBTITLE_OUTLINE_WIDTH,
+    subtitle_shadow_color: str = DEFAULT_SUBTITLE_SHADOW_COLOR,
+    subtitle_shadow_x: int = DEFAULT_SUBTITLE_SHADOW_X,
+    subtitle_shadow_y: int = DEFAULT_SUBTITLE_SHADOW_Y,
+    words_per_subtitle: int = DEFAULT_WORDS_PER_SUBTITLE,
+    vosk_model_path: str = DEFAULT_VOSK_MODEL_PATH,
+    cinematic_preset: Optional[str] = None,
+    custom_lut_path: Optional[str] = None,
     enable_vignette: bool = False,
-    vignette_intensity: float = 1,
+    vignette_intensity: float = DEFAULT_VIGNETTE_INTENSITY,
     enable_curves: bool = False,
-    custom_curves: str = None,
+    custom_curves: Optional[str] = None,
     remove_silence: bool = False,
     silence_threshold: int = -40,
     silence_duration: float = 0.5,
-    encoder: str = "libx264",
-    performance_profile: str = "quality",
-    threads: int = 0,
-    gpu_quality: int = 18,
-    resolution_preset: str = "horizontal_1080p",
-    background_music: str = None,
-    background_music_volume: float = 0.2,
-    subtitle_effect: str = "none",
-    ending_video_path: str = None,
-    opening_video_paths: TList[str] = None,
-    progress_callback: Callable[[int], None] = None,
-):
-    # Remove silêncio da narração se habilitado
-    if remove_silence:
-        from audio_utils import remove_audio_silence
-        narration_path = remove_audio_silence(
-            narration_path,
-            threshold_db=silence_threshold,
-            stop_duration=silence_duration
-        )
+    encoder: str = DEFAULT_ENCODER,
+    performance_profile: str = DEFAULT_PERFORMANCE_PROFILE,
+    threads: int = DEFAULT_THREADS,
+    gpu_quality: int = DEFAULT_GPU_QUALITY,
+    resolution_preset: str = DEFAULT_RESOLUTION_PRESET,
+    background_music: Optional[str] = None,
+    background_music_volume: float = DEFAULT_BACKGROUND_MUSIC_VOLUME,
+    subtitle_effect: str = DEFAULT_SUBTITLE_EFFECT,
+    ending_video_path: Optional[str] = None,
+    opening_video_paths: Optional[TList[str]] = None,
+    progress_callback: Optional[Callable[[int], None]] = None,
+) -> Any:
+    """
+    Generates a video from a narration audio file and media folder.
 
-    stages = [
-        EncoderStage(),
-        MediaCacheStage(),
-        VideoBaseStage(),
-        TransitionStage(),
-        OpeningStage(),
-        OverlayStage(),
-        LogoStage(),
-        ChromaStage(),
-        CinematicStage(),
-        SubtitleStage(),
-        BackgroundMusicStage(),
-        EndingStage(),
-        OutputStage()
-    ]
-    ctx = {
-        "narration_path": narration_path,
-        "videos_folder": videos_folder,
-        "out_path": out_path,
-        "seed": seed,
-        "shuffle": shuffle,
-        "fps": fps,
-        "width": width,
-        "height": height,
-        "crf": crf,
-        "preset": preset,
-        "video_mode": video_mode,
-        "image_segment_duration": image_segment_duration,
-        "overlay": overlay,
-        "overlay_opacity": overlay_opacity,
-        "logo": logo,
-        "logo_scale": logo_scale,
-        "logo_x": logo_x,
-        "logo_y": logo_y,
-        "logo_position": logo_position,
-        "chroma": chroma,
-        "chroma_scale": chroma_scale,
-        "chroma_position": chroma_position,
-        "chroma_start": chroma_start,
-        "chroma_list": chroma_list,
-        "transition_type": transition_type,
-        "enable_subtitles": enable_subtitles,
-        "subtitle_font_size": subtitle_font_size,
-        "subtitle_color": subtitle_color,
-        "subtitle_position": subtitle_position,
-        "subtitle_font": subtitle_font,
-        "subtitle_outline_color": subtitle_outline_color,
-        "subtitle_outline_width": subtitle_outline_width,
-        "subtitle_shadow_color": subtitle_shadow_color,
-        "subtitle_shadow_x": subtitle_shadow_x,
-        "subtitle_shadow_y": subtitle_shadow_y,
-        "words_per_subtitle": words_per_subtitle,
-        "vosk_model_path": vosk_model_path,
-        "cinematic_preset": cinematic_preset,
-        "custom_lut_path": custom_lut_path,
-        "enable_vignette": enable_vignette,
-        "vignette_intensity": vignette_intensity,
-        "enable_curves": enable_curves,
-        "custom_curves": custom_curves,
-        "encoder": encoder,
-        "performance_profile": performance_profile,
-        "threads": threads,
-        "gpu_quality": gpu_quality,
-        "resolution_preset": resolution_preset,
-        "background_music": background_music,
-        "background_music_volume": background_music_volume,
-        "subtitle_effect": subtitle_effect,
-        "ending_video_path": ending_video_path,
-        "opening_video_paths": opening_video_paths if opening_video_paths else [],
-        "progress_callback": progress_callback,
-    }
-    pipeline = MediaPipeline(stages)
-    return pipeline.run(ctx)
+    Args:
+        narration_path (str): Path to narration audio file.
+        videos_folder (str): Path to folder with video/image clips.
+        out_path (str): Output video file path.
+        ... (other parameters documented above)
+    Returns:
+        Any: Result of pipeline.run(ctx)
+    Raises:
+        VideoFromNarrationError: If video generation fails.
+    """
+    try:
+        if remove_silence:
+            from audio_utils import remove_audio_silence
+            narration_path = remove_audio_silence(
+                narration_path,
+                threshold_db=silence_threshold,
+                stop_duration=silence_duration
+            )
 
+        stages = [
+            EncoderStage(),
+            MediaCacheStage(),
+            VideoBaseStage(),
+            TransitionStage(),
+            OpeningStage(),
+            OverlayStage(),
+            LogoStage(),
+            ChromaStage(),
+            CinematicStage(),
+            SubtitleStage(),
+            BackgroundMusicStage(),
+            EndingStage(),
+            OutputStage()
+        ]
+        ctx = {
+            "narration_path": narration_path,
+            "videos_folder": videos_folder,
+            "out_path": out_path,
+            "seed": seed,
+            "shuffle": shuffle,
+            "fps": fps,
+            "width": width,
+            "height": height,
+            "crf": crf,
+            "preset": preset,
+            "video_mode": video_mode,
+            "image_segment_duration": image_segment_duration,
+            "overlay": overlay,
+            "overlay_opacity": overlay_opacity,
+            "logo": logo,
+            "logo_scale": logo_scale,
+            "logo_x": logo_x,
+            "logo_y": logo_y,
+            "logo_position": logo_position,
+            "chroma": chroma,
+            "chroma_scale": chroma_scale,
+            "chroma_position": chroma_position,
+            "chroma_start": chroma_start,
+            "chroma_list": chroma_list,
+            "transition_type": transition_type,
+            "enable_subtitles": enable_subtitles,
+            "subtitle_font_size": subtitle_font_size,
+            "subtitle_color": subtitle_color,
+            "subtitle_position": subtitle_position,
+            "subtitle_font": subtitle_font,
+            "subtitle_outline_color": subtitle_outline_color,
+            "subtitle_outline_width": subtitle_outline_width,
+            "subtitle_shadow_color": subtitle_shadow_color,
+            "subtitle_shadow_x": subtitle_shadow_x,
+            "subtitle_shadow_y": subtitle_shadow_y,
+            "words_per_subtitle": words_per_subtitle,
+            "vosk_model_path": vosk_model_path,
+            "cinematic_preset": cinematic_preset,
+            "custom_lut_path": custom_lut_path,
+            "enable_vignette": enable_vignette,
+            "vignette_intensity": vignette_intensity,
+            "enable_curves": enable_curves,
+            "custom_curves": custom_curves,
+            "encoder": encoder,
+            "performance_profile": performance_profile,
+            "threads": threads,
+            "gpu_quality": gpu_quality,
+            "resolution_preset": resolution_preset,
+            "background_music": background_music,
+            "background_music_volume": background_music_volume,
+            "subtitle_effect": subtitle_effect,
+            "ending_video_path": ending_video_path,
+            "opening_video_paths": opening_video_paths if opening_video_paths else [],
+            "progress_callback": progress_callback,
+        }
+        pipeline = MediaPipeline(stages)
+        return pipeline.run(ctx)
+    except Exception as exc:
+        logging.error(f"Video generation failed: {exc}")
+        raise VideoFromNarrationError(f"Video generation failed: {exc}") from exc
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gera vídeo a partir de narração e clipes ou imagens.")

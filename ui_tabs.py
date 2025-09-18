@@ -1,9 +1,11 @@
 # ui_tabs.py
+from typing import Optional, Tuple
+import logging
+
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QPushButton,
     QSpinBox,
@@ -17,13 +19,57 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, QObject
 
+# Named constants for magic numbers
+MIN_WIDTH = 320
+MAX_WIDTH = 3840
+MIN_HEIGHT = 240
+MAX_HEIGHT = 2160
+MIN_FPS = 24
+MAX_FPS = 60
+MIN_CRF = 0
+MAX_CRF = 51
+MIN_GPU_QUALITY = 1
+MAX_GPU_QUALITY = 51
+MIN_THREADS = 0
+MAX_THREADS = 32
+MIN_IMAGE_SEGMENT_DURATION = 0.5
+MAX_IMAGE_SEGMENT_DURATION = 60.0
+MIN_VIGNETTE_INTENSITY = 0.0
+MAX_VIGNETTE_INTENSITY = 1.0
+MIN_BG_MUSIC_VOLUME = 0.0
+MAX_BG_MUSIC_VOLUME = 1.0
+MIN_SILENCE_THRESHOLD = -60
+MAX_SILENCE_THRESHOLD = -20
+MIN_SILENCE_DURATION = 0.1
+MAX_SILENCE_DURATION = 2.0
+MIN_LOGO_SCALE = 0.05
+MAX_LOGO_SCALE = 1.0
+MIN_LOGO_OFFSET = 0
+MAX_LOGO_OFFSET = 2000
+MIN_OVERLAY_OPACITY = 0.1
+MAX_OVERLAY_OPACITY = 1.0
+MIN_CHROMA_SCALE = 0.1
+MAX_CHROMA_SCALE = 2.0
+MIN_CHROMA_START = 0
+MAX_CHROMA_START = 6000
+MIN_SUBTITLE_FONT_SIZE = 10
+MAX_SUBTITLE_FONT_SIZE = 150
+
 
 class FileBrowseWidget(QWidget):
-    """Widget reutilizável para um campo de texto com um botão 'Procurar'."""
+    """Reusable widget for a text field with a 'Browse' button.
+
+    Args:
+        placeholder (str): Placeholder text for the line edit.
+        browse_mode (str): 'file' or 'folder'.
+        file_filter (str): File filter for dialog.
+    """
 
     textChanged = Signal(str)
 
-    def __init__(self, placeholder="", browse_mode="file", file_filter="Todos (*.*)"):
+    def __init__(
+        self, placeholder: str = "", browse_mode: str = "file", file_filter: str = "Todos (*.*)"
+    ) -> None:
         super().__init__()
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -39,34 +85,40 @@ class FileBrowseWidget(QWidget):
 
         if browse_mode == "file":
             self.browse_button.clicked.connect(lambda: self._browse_file(file_filter))
-        else:  # folder
+        else:
             self.browse_button.clicked.connect(self._browse_folder)
 
-    def _browse_file(self, file_filter):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Selecionar Arquivo", "", file_filter
-        )
-        if path:
-            self.line_edit.setText(path)
+    def _browse_file(self, file_filter: str) -> None:
+        """Open file dialog and set selected file path."""
+        try:
+            path, _ = QFileDialog.getOpenFileName(self, "Selecionar Arquivo", "", file_filter)
+            if path:
+                self.line_edit.setText(path)
+        except Exception as exc:
+            logging.error(f"Error browsing file: {exc}")
 
-    def _browse_folder(self):
-        path = QFileDialog.getExistingDirectory(self, "Selecionar Pasta")
-        if path:
-            self.line_edit.setText(path)
+    def _browse_folder(self) -> None:
+        """Open folder dialog and set selected folder path."""
+        try:
+            path = QFileDialog.getExistingDirectory(self, "Selecionar Pasta")
+            if path:
+                self.line_edit.setText(path)
+        except Exception as exc:
+            logging.error(f"Error browsing folder: {exc}")
 
-    def text(self):
+    def text(self) -> str:
+        """Get the current text value."""
         return self.line_edit.text()
 
-    def setText(self, text):
+    def setText(self, text: str) -> None:
+        """Set the text value."""
         self.line_edit.setText(text)
 
 
-# (O resto do arquivo ui_tabs.py permanece exatamente o mesmo)
-# ...
 class BasicTab(QWidget):
-    """Aba de configurações básicas (Arquivos e Modo)."""
+    """Tab for basic settings (Files and Mode)."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         layout = QFormLayout(self)
         layout.setSpacing(15)
@@ -94,9 +146,9 @@ class BasicTab(QWidget):
 
 
 class VideoTab(QWidget):
-    """Aba de configurações de Vídeo, Qualidade, Efeitos, etc."""
+    """Tab for video settings, quality, effects, etc."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         layout = QVBoxLayout(self)
 
@@ -108,11 +160,11 @@ class VideoTab(QWidget):
             ["horizontal_1080p", "horizontal_720p", "vertical_1080p", "custom"]
         )
         self.width = QSpinBox()
-        self.width.setRange(320, 3840)
+        self.width.setRange(MIN_WIDTH, MAX_WIDTH)
         self.height = QSpinBox()
-        self.height.setRange(240, 2160)
+        self.height.setRange(MIN_HEIGHT, MAX_HEIGHT)
         self.fps = QSpinBox()
-        self.fps.setRange(24, 60)
+        self.fps.setRange(MIN_FPS, MAX_FPS)
         res_layout.addRow("Preset:", self.resolution_preset)
         res_layout.addRow("Largura:", self.width)
         res_layout.addRow("Altura:", self.height)
@@ -127,13 +179,13 @@ class VideoTab(QWidget):
         self.performance_profile = QComboBox()
         self.performance_profile.addItems(["quality", "balanced", "speed"])
         self.crf = QSpinBox()
-        self.crf.setRange(0, 51)
+        self.crf.setRange(MIN_CRF, MAX_CRF)
         self.gpu_quality = QSpinBox()
-        self.gpu_quality.setRange(1, 51)
+        self.gpu_quality.setRange(MIN_GPU_QUALITY, MAX_GPU_QUALITY)
         self.preset = QComboBox()
         self.preset.addItems(["ultrafast", "medium", "veryslow"])
         self.threads = QSpinBox()
-        self.threads.setRange(0, 32)
+        self.threads.setRange(MIN_THREADS, MAX_THREADS)
         self.threads.setSpecialValueText("Auto")
         enc_layout.addRow("Encoder:", self.encoder)
         enc_layout.addRow("Perfil:", self.performance_profile)
@@ -147,7 +199,7 @@ class VideoTab(QWidget):
         img_group = QGroupBox("Modo de Imagens")
         img_layout = QFormLayout(img_group)
         self.image_segment_duration = QDoubleSpinBox()
-        self.image_segment_duration.setRange(0.5, 60.0)
+        self.image_segment_duration.setRange(MIN_IMAGE_SEGMENT_DURATION, MAX_IMAGE_SEGMENT_DURATION)
         self.transition_type = QComboBox()
         self.transition_type.addItems(["none", "fade", "random"])
         img_layout.addRow("Duração por imagem (s):", self.image_segment_duration)
@@ -166,7 +218,7 @@ class VideoTab(QWidget):
         )
         self.enable_vignette = QCheckBox("Habilitar vinheta")
         self.vignette_intensity = QDoubleSpinBox()
-        self.vignette_intensity.setRange(0.0, 1.0)
+        self.vignette_intensity.setRange(MIN_VIGNETTE_INTENSITY, MAX_VIGNETTE_INTENSITY)
         self.enable_curves = QCheckBox("Habilitar curvas personalizadas")
         self.custom_curves = QLineEdit()
         self.custom_curves.setPlaceholderText("Ex: 'r=.../g=.../b=...'")
@@ -185,12 +237,12 @@ class VideoTab(QWidget):
             "Música de fundo (opcional)", "file", "Áudios (*.mp3 *.wav)"
         )
         self.background_music_volume = QDoubleSpinBox()
-        self.background_music_volume.setRange(0.0, 1.0)
+        self.background_music_volume.setRange(MIN_BG_MUSIC_VOLUME, MAX_BG_MUSIC_VOLUME)
         self.remove_silence = QCheckBox("Remover silêncio da narração")
         self.silence_threshold = QSpinBox()
-        self.silence_threshold.setRange(-60, -20)
+        self.silence_threshold.setRange(MIN_SILENCE_THRESHOLD, MAX_SILENCE_THRESHOLD)
         self.silence_duration = QDoubleSpinBox()
-        self.silence_duration.setRange(0.1, 2.0)
+        self.silence_duration.setRange(MIN_SILENCE_DURATION, MAX_SILENCE_DURATION)
         audio_layout.addRow("Música de Fundo:", self.background_music)
         audio_layout.addRow("Volume da Música:", self.background_music_volume)
         audio_layout.addRow(self.remove_silence)
@@ -236,11 +288,11 @@ class VideoTab(QWidget):
 
 
 class ChromaItemWidget(QGroupBox):
-    """Um widget para configurar um único arquivo de Chroma Key."""
+    """Widget for configuring a single Chroma Key file."""
 
     remove_clicked = Signal(QObject)
 
-    def __init__(self, index: int):
+    def __init__(self, index: int) -> None:
         super().__init__(f"Chroma Key #{index + 1}")
 
         layout = QFormLayout(self)
@@ -249,7 +301,7 @@ class ChromaItemWidget(QGroupBox):
             "Arquivo de vídeo (.mp4)", "file", "Vídeos (*.mp4)"
         )
         self.scale = QDoubleSpinBox()
-        self.scale.setRange(0.1, 2.0)
+        self.scale.setRange(MIN_CHROMA_SCALE, MAX_CHROMA_SCALE)
         self.scale.setSingleStep(0.1)
         self.position = QComboBox()
         self.position.addItems(
@@ -263,7 +315,7 @@ class ChromaItemWidget(QGroupBox):
             ]
         )
         self.start = QDoubleSpinBox()
-        self.start.setRange(0, 6000)
+        self.start.setRange(MIN_CHROMA_START, MAX_CHROMA_START)
         self.start.setSingleStep(1.0)
         self.remove_button = QPushButton("Remover este Chroma")
 
@@ -276,11 +328,10 @@ class ChromaItemWidget(QGroupBox):
         self.remove_button.clicked.connect(lambda: self.remove_clicked.emit(self))
 
 
-# --- CLASSE OverlayTab MODIFICADA ---
 class OverlayTab(QWidget):
-    """Aba para configurar Logo, Overlay de vídeo e Chroma Keys."""
+    """Tab for configuring Logo, Video Overlay, and Chroma Keys."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         layout = QVBoxLayout(self)
 
@@ -291,7 +342,7 @@ class OverlayTab(QWidget):
             "Arquivo de logo (.png)", "file", "Imagens (*.png)"
         )
         self.logo_scale = QDoubleSpinBox()
-        self.logo_scale.setRange(0.05, 1.0)
+        self.logo_scale.setRange(MIN_LOGO_SCALE, MAX_LOGO_SCALE)
         self.logo_scale.setSingleStep(0.05)
         self.logo_position = QComboBox()
         self.logo_position.addItems(
@@ -306,9 +357,9 @@ class OverlayTab(QWidget):
             ]
         )
         self.logo_x = QSpinBox()
-        self.logo_x.setRange(0, 2000)
+        self.logo_x.setRange(MIN_LOGO_OFFSET, MAX_LOGO_OFFSET)
         self.logo_y = QSpinBox()
-        self.logo_y.setRange(0, 2000)
+        self.logo_y.setRange(MIN_LOGO_OFFSET, MAX_LOGO_OFFSET)
         logo_layout.addRow("Arquivo:", self.logo)
         logo_layout.addRow("Escala:", self.logo_scale)
         logo_layout.addRow("Posição:", self.logo_position)
@@ -323,7 +374,7 @@ class OverlayTab(QWidget):
             "Arquivo de overlay (.mp4)", "file", "Vídeos (*.mp4)"
         )
         self.overlay_opacity = QDoubleSpinBox()
-        self.overlay_opacity.setRange(0.1, 1.0)
+        self.overlay_opacity.setRange(MIN_OVERLAY_OPACITY, MAX_OVERLAY_OPACITY)
         self.overlay_opacity.setSingleStep(0.1)
         overlay_layout.addRow("Arquivo:", self.overlay)
         overlay_layout.addRow("Opacidade:", self.overlay_opacity)
@@ -346,9 +397,9 @@ class OverlayTab(QWidget):
 
 
 class SubtitleTab(QWidget):
-    """Aba para todas as configurações de legendas."""
+    """Tab for all subtitle settings."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         # CORREÇÃO: Usar QVBoxLayout como layout principal para suportar addStretch()
         layout = QVBoxLayout(self)
@@ -381,7 +432,7 @@ class SubtitleTab(QWidget):
         sub_group = QGroupBox("Configurações de Legendas")
         sub_layout = QFormLayout(sub_group)
         self.subtitle_font_size = QSpinBox()
-        self.subtitle_font_size.setRange(10, 150)
+        self.subtitle_font_size.setRange(MIN_SUBTITLE_FONT_SIZE, MAX_SUBTITLE_FONT_SIZE)
         self.subtitle_color = QComboBox()
         self.subtitle_color.addItems(
             ["white", "yellow", "black", "red", "green", "blue"]

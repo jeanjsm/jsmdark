@@ -1,4 +1,7 @@
 # ui_main_window.py
+from typing import Optional
+import logging
+
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QProgressBar, QMessageBox, QListWidget, QTextEdit, QSplitter,
@@ -8,20 +11,38 @@ from PySide6.QtGui import QFont, QIcon
 from PySide6.QtCore import Qt
 from ui_tabs import BasicTab, VideoTab, OverlayTab, SubtitleTab
 
+WINDOW_TITLE = "Gerador de Vídeos Automatizado"
+WINDOW_MIN_WIDTH = 1200
+WINDOW_MIN_HEIGHT = 800
+SPLITTER_LEFT_SIZE = 700
+SPLITTER_RIGHT_SIZE = 500
+QUEUE_TITLE_FONT_SIZE = 14
+QUEUE_TITLE_FONT_FAMILY = "Arial"
+QUEUE_TITLE_FONT_WEIGHT = QFont.Bold
+
 
 class VideoGeneratorGUI(QMainWindow):
-    """Classe da View, responsável apenas pela aparência da janela principal."""
+    """Main application window for the video generator GUI.
 
-    def __init__(self):
+    Handles the appearance and layout of the main window, including configuration tabs,
+    queue panel, progress bar, and action buttons.
+    """
+
+    def __init__(self) -> None:
+        """Initializes the main window and its UI components."""
         super().__init__()
-        self.setWindowTitle("Gerador de Vídeos Automatizado")
-        self.setMinimumSize(1200, 800)
+        self.setWindowTitle(WINDOW_TITLE)
+        self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self.setWindowIcon(QIcon.fromTheme("multimedia-video-player"))
+        try:
+            self._setup_ui()
+            self.apply_stylesheet()
+        except Exception as exc:
+            logging.error(f"Error setting up UI: {exc}")
+            QMessageBox.critical(self, "Erro", f"Falha ao inicializar a interface: {exc}")
 
-        self._setup_ui()
-        self.apply_stylesheet()
-
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
+        """Sets up the main UI layout, tabs, panels, and buttons."""
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         main_layout = QVBoxLayout(self.central_widget)
@@ -29,7 +50,7 @@ class VideoGeneratorGUI(QMainWindow):
         splitter = QSplitter(Qt.Horizontal)
         main_layout.addWidget(splitter, 1)
 
-        # Painel de Configurações (Esquerda) com Scroll
+        # Config panel (left) with scroll
         self.config_panel = QWidget()
         config_layout = QVBoxLayout(self.config_panel)
         config_layout.setContentsMargins(0, 0, 0, 0)
@@ -52,38 +73,40 @@ class VideoGeneratorGUI(QMainWindow):
         scroll_area.setWidget(self.tabs)
         config_layout.addWidget(scroll_area)
 
-        # --- SEÇÃO MODIFICADA ---
-        # Botões de Ação
+        # Action buttons
         action_buttons_layout = QHBoxLayout()
         self.generate_button = QPushButton("Gerar Vídeo Único")
         self.add_to_queue_button = QPushButton("Adicionar à Fila")
-        self.save_config_button = QPushButton("Salvar Configurações")  # NOVO BOTÃO
-
+        self.save_config_button = QPushButton("Salvar Configurações")
         action_buttons_layout.addWidget(self.generate_button)
         action_buttons_layout.addWidget(self.add_to_queue_button)
-        action_buttons_layout.addWidget(self.save_config_button)  # ADICIONADO AO LAYOUT
+        action_buttons_layout.addWidget(self.save_config_button)
         config_layout.addLayout(action_buttons_layout)
-        # --- FIM DA SEÇÃO MODIFICADA ---
 
         splitter.addWidget(self.config_panel)
 
-        # Painel da Fila (Direita)
+        # Queue panel (right)
         self.queue_panel = self._create_queue_panel()
         splitter.addWidget(self.queue_panel)
-        splitter.setSizes([700, 500])
+        splitter.setSizes([SPLITTER_LEFT_SIZE, SPLITTER_RIGHT_SIZE])
 
-        # Barra de Progresso Global
+        # Global progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setFormat("Progresso Geral: %p%")
         main_layout.addWidget(self.progress_bar)
 
     def _create_queue_panel(self) -> QWidget:
+        """Creates the queue panel with list, buttons, and log area.
+
+        Returns:
+            QWidget: The queue panel widget.
+        """
         panel = QWidget()
         layout = QVBoxLayout(panel)
 
         title = QLabel("Fila de Processamento")
-        title.setFont(QFont("Arial", 14, QFont.Bold))
+        title.setFont(QFont(QUEUE_TITLE_FONT_FAMILY, QUEUE_TITLE_FONT_SIZE, QUEUE_TITLE_FONT_WEIGHT))
         layout.addWidget(title)
 
         self.queue_list = QListWidget()
@@ -110,11 +133,16 @@ class VideoGeneratorGUI(QMainWindow):
 
         return panel
 
-    def apply_stylesheet(self):
+    def apply_stylesheet(self) -> None:
+        """Applies the dark theme stylesheet to the main window."""
         self.setStyleSheet("""
             /* ... (Cole o CSS do tema escuro da resposta anterior aqui) ... */
         """)
 
-    def closeEvent(self, event):
-        # O Controller vai interceptar isso para salvar
+    def closeEvent(self, event: Optional[object]) -> None:
+        """Intercepts the window close event for controller handling.
+
+        Args:
+            event (Optional[object]): The close event object.
+        """
         pass

@@ -1,40 +1,58 @@
-# Instruções para GitHub Copilot
+# copilot-instructions.md
 
-Always conform to the coding styles defined in styleguide.md in repo my-repo when generating code.
+## Coding Standards
 
-## Manutenção de código
-- **NÃO** apague funções, trechos de código nem comentários existentes, a menos que explicitamente solicitado via comentário TODO ou instrução clara.
-- Ao modificar funções existentes, mantenha a assinatura, tipo de retorno e documentação inalterados, a menos que solicitado.
-- Se for sugerida uma função ou classe nova, NUNCA remova implementação anterior sem orientação em pull request ou issue associada.
+### General Principles
+- **Target Framework:** All projects use **Python 3.12** (or the version defined in the project). Ensure compatibility with this version.
+- **Language:** Use Python for all code unless otherwise specified.
+- **Readability:** Write clear, self-explanatory code. Use meaningful variable, function, class, and module names.
+- **Consistency:** Follow consistent naming conventions (PEP 8/PEP 257) and code formatting throughout the solution.
+- **Comments:** Add inline comments only where necessary to clarify complex logic; prefer self-explanatory code.
+- **Docstrings:** Use docstrings for modules, classes, functions, and methods, following a consistent style (Google or NumPy).
+- **Error Handling:** Use structured exception handling. Avoid swallowing exceptions; log or re-raise as appropriate. Create custom exceptions when useful.
+- **Design Principles:** Follow SOLID-inspired principles adapted for Python (cohesion, low coupling, ABCs/protocols).
+- **Dependency Injection:** Prefer constructor or parameter injection for dependencies.
+- **Async/Await:** Use asynchronous programming patterns where appropriate, especially for I/O-bound operations. Do not block the event loop.
+- **Magic Numbers:** Avoid magic numbers; use named constants or enums.
+- **File Organization:** Prefer one concept per file/module. Organize files into appropriate folders by feature or layer.
+- **Static Typing:** Use type hints and validate with mypy (or pyright).
 
-## Estilo e padrões
-- Utilize nomes de funções, variáveis e classes sempre em inglês.
-- Siga PEP8 e utilize f-strings para formatação de strings.
-- Docstrings de funções devem ser mantidas e, se ausentes, sugeridas no formato padrão (primeira linha descritiva no imperativo).
-- Ao propor mudanças em funções de processamento de vídeo ou chamadas FFmpeg, sempre cheque se há testes associados e mantenha caso de uso compatível.
-- Os imports devem ser mantidos no topo do arquivo, organizados por padrão (bibliotecas padrão, terceiros, locais) e sem duplicação.
+### Naming Conventions
+- **Packages & Modules:** snake_case (e.g., `user_service.py`)
+- **Classes & Exceptions:** PascalCase (e.g., `UserService`, `UserNotFoundError`)
+- **Functions & Methods:** snake_case (e.g., `get_user_by_id`)
+- **Variables & Parameters:** snake_case (e.g., `user_id`)
+- **Constants:** UPPER_CASE (e.g., `DEFAULT_TIMEOUT`)
+- **Unit Test Functions:** Use descriptive names indicating the scenario and expected outcome (e.g., `test_get_user_by_id_returns_user_when_user_exists`)
 
-## FFmpeg integration
-- Sempre otimize comandos FFmpeg para evitar processamento desnecessário, e para melhorar a performance e reduzir o tempo de execução.
-- Sempre que alterar partes que usam FFmpeg (diretamente via subprocess ou wrappers), preserve exemplos e comentários explicativos.
-- Não invente comandos FFmpeg: consulte sempre a documentação oficial ou scripts já no repositório.
-- Garanta que todo novo comando FFmpeg adicionado esteja documentado na função correspondente.
-- Evite sugerir comandos FFmpeg complexos sem verificar se já existem implementações similares no repositório.
-- Se for necessário alterar a lógica de processamento de vídeo, verifique se há testes que cubram os casos de uso e mantenha-os atualizados.
-- Validar o funcionamento de comandos FFmpeg com testes automatizados é essencial. Se não houver testes, crie-os para garantir a integridade do código.
-- Valide o comando FFmpeg gerado com a documentação oficial do FFmpeg e com os testes existentes no repositório.
+### Code Style
+- **Formatting:** Use Black for code formatting. Do not manually override its output.
+- **Indentation:** Use 4 spaces per indentation level.
+- **Line Length:** Limit lines to 120 characters.
+- **Imports:** Group imports (stdlib, third-party, local) with blank lines between. Use isort. Avoid `import *`.
+- **Strings:** Prefer f-strings. Declare UTF-8 encoding explicitly if necessary.
+- **Comparisons:** Use `is`/`is not` for `None`. Avoid ambiguous truthiness checks.
+- **Context Managers:** Use `with` for resources (files, connections).
+- **Linting:** Use ruff (or flake8 with plugins). Resolve relevant warnings.
 
-## Boas práticas gerais
-- Tente sempre implementar o S.O.L.I.D. no projeto.
-- Sempre preserve comentários, marcações TODO e FIXMEs.
-- Não duplique funções.
-- Testes automatizados não devem ser removidos nem ignorados.
-- Se for necessário refatorar uma função, mantenha a lógica original antes de qualquer sugestão de alteração profunda.
-- Nunca deixe funções em branco ou "stubadas" caso já haja implementação.
-- Responda apenas com o código necessário para a tarefa solicitada, sem adicionar comentários desnecessários ou explicações redundantes.
-- Se houver necessidade de adicionar novos testes, faça isso de forma clara e mantenha a cobertura
-- Evite sugerir mudanças que não estejam diretamente relacionadas à tarefa solicitada.
-- Sempre que possível, mantenha a estrutura e organização do código existente.
-- Respeite a lógica de negócios existente e evite mudanças que possam quebrar funcionalidades já implementadas.
-- Responda todas as solicitações de forma concisa e objetiva, focando apenas no que foi solicitado.
-- Responda todas as solicitações com no máximo de 500 caracteres, e em português.
+---
+
+## Copilot Usage
+
+- **Adhere to these standards** when generating or modifying Python code.
+- **Prefer existing patterns** and conventions found in the solution.
+- **Generate code that is ready to use** and fits seamlessly into the current structure, including type hints, docstrings, and tests when applicable.
+- **Ensure style compatibility** with automated tools (Black, isort, ruff).
+- **Document any deviations** from these standards in pull requests or code reviews.
+- **For async code**, provide examples of async tests (`pytest.mark.asyncio`) and ensure non-blocking behavior.
+- **For external I/O**, abstract logic behind interfaces/protocols (ABCs or typing.Protocol) for easier testing and mocking.
+
+
+## Unit Test Standards
+
+### General Principles
+- **Test Framework:** Use **pytest** as the default test framework. Use `pytest-mock` or `unittest.mock` for mocking when appropriate.
+- **Test Naming:** Use descriptive function names in the format: `function_name_state_under_test_expected_behavior`.
+- **Test Structure:** Follow the Arrange-Act-Assert (AAA) pattern in all tests.
+- **Isolation:** Each test must be independent and not rely on the outcome of other tests.
+- **Mocking:** Use mocks or fakes for external dependencies (e.g., APIs, databases, file systems) to ensure tests are deterministic and reliable.
