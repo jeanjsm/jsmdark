@@ -13,6 +13,7 @@ from ffmpeg_utils import get_ffmpeg_path
 # Utilitários de texto/Unicode
 # -----------------------------
 
+
 def normalize_text(s: str) -> str:
     """
     Normaliza o texto para NFC e remove caracteres de controle invisíveis
@@ -42,6 +43,7 @@ def ff_escape(s: str) -> str:
 # Extração de áudio para transcrição (Vosk)
 # ------------------------------------------
 
+
 def extract_audio_for_transcription(video_path: str, output_path: str) -> None:
     """Extrai áudio do vídeo em formato WAV mono 16kHz para o Vosk (mais enxuto e performático)."""
     cmd = [
@@ -51,10 +53,14 @@ def extract_audio_for_transcription(video_path: str, output_path: str) -> None:
         "-vn",  # descarta vídeo
         "-sn",  # descarta legendas
         "-dn",  # descarta data streams
-        "-i", video_path,
-        "-ar", "16000",
-        "-ac", "1",
-        "-f", "wav",
+        "-i",
+        video_path,
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-f",
+        "wav",
         output_path,
     ]
     # Não use capture_output=True para evitar buffers gigantes desnecessários
@@ -65,7 +71,10 @@ def extract_audio_for_transcription(video_path: str, output_path: str) -> None:
 # Transcrição com Vosk
 # ------------------------------------------
 
-def transcribe_audio(audio_path: str, model_path: str = "_internal/vosk_models/vosk-model-pt") -> List[Tuple[float, float, str]]:
+
+def transcribe_audio(
+    audio_path: str, model_path: str = "_internal/vosk_models/vosk-model-pt"
+) -> List[Tuple[float, float, str]]:
     """Transcreve áudio usando Vosk e retorna lista de (start, end, text)."""
     if not Path(model_path).exists():
         raise FileNotFoundError(f"Modelo Vosk não encontrado: {model_path}")
@@ -77,7 +86,7 @@ def transcribe_audio(audio_path: str, model_path: str = "_internal/vosk_models/v
     segments: List[Tuple[float, float, str]] = []
 
     # Opcional: validar que o WAV está 16kHz mono
-    with wave.open(audio_path, 'rb') as wf:
+    with wave.open(audio_path, "rb") as wf:
         # Leitura por blocos (~0,25s a 16kHz mono com 4000 frames)
         while True:
             data = wf.readframes(4000)
@@ -86,21 +95,21 @@ def transcribe_audio(audio_path: str, model_path: str = "_internal/vosk_models/v
 
             if rec.AcceptWaveform(data):
                 result = json.loads(rec.Result())
-                if 'result' in result and result['result']:
-                    for word in result['result']:
-                        start = float(word.get('start', 0.0))
-                        end = float(word.get('end', 0.0))
-                        text = normalize_text(word.get('word', ""))
+                if "result" in result and result["result"]:
+                    for word in result["result"]:
+                        start = float(word.get("start", 0.0))
+                        end = float(word.get("end", 0.0))
+                        text = normalize_text(word.get("word", ""))
                         if text:
                             segments.append((start, end, text))
 
     # Processa resultado final
     final_result = json.loads(rec.FinalResult())
-    if 'result' in final_result and final_result['result']:
-        for word in final_result['result']:
-            start = float(word.get('start', 0.0))
-            end = float(word.get('end', 0.0))
-            text = normalize_text(word.get('word', ""))
+    if "result" in final_result and final_result["result"]:
+        for word in final_result["result"]:
+            start = float(word.get("start", 0.0))
+            end = float(word.get("end", 0.0))
+            text = normalize_text(word.get("word", ""))
             if text:
                 segments.append((start, end, text))
 
@@ -111,6 +120,7 @@ def transcribe_audio(audio_path: str, model_path: str = "_internal/vosk_models/v
 # Posicionamento de legenda
 # ------------------------------------------
 
+
 def get_subtitle_position(position: str) -> str:
     """Retorna as coordenadas x,y para a posição da legenda."""
     positions = {
@@ -120,7 +130,7 @@ def get_subtitle_position(position: str) -> str:
         "center": "x=(w-text_w)/2:y=(h-text_h)/2",
         "bottom_left": "x=20:y=h-text_h-20",
         "bottom_center": "x=(w-text_w)/2:y=h-60",
-        "bottom_right": "x=w-text_w-20:y=h-text_h-20"
+        "bottom_right": "x=w-text_w-20:y=h-text_h-20",
     }
     return positions.get(position, "x=(w-text_w)/2:y=h-60")
 
@@ -129,7 +139,10 @@ def get_subtitle_position(position: str) -> str:
 # Agrupamento de palavras em legendas
 # ------------------------------------------
 
-def group_words_by_count(segments: List[Tuple[float, float, str]], words_per_group: int = 1) -> List[Tuple[float, float, str]]:
+
+def group_words_by_count(
+    segments: List[Tuple[float, float, str]], words_per_group: int = 1
+) -> List[Tuple[float, float, str]]:
     """Agrupa palavras consecutivas respeitando o limite de palavras por grupo."""
     if not segments or words_per_group <= 1:
         return segments
@@ -162,6 +175,7 @@ def group_words_by_count(segments: List[Tuple[float, float, str]], words_per_gro
 # ------------------------------------------
 # (FALLBACK) Geração de filtro drawtext
 # ------------------------------------------
+
 
 def create_subtitle_filter(
     segments: List[Tuple[float, float, str]],
@@ -230,10 +244,13 @@ def create_subtitle_filter(
 # Geração de arquivos de legenda (SRT / ASS)
 # ------------------------------------------
 
-def generate_srt_file(segments: List[Tuple[float, float, str]], output_path: str, add_bom: bool = False) -> None:
+
+def generate_srt_file(
+    segments: List[Tuple[float, float, str]], output_path: str, add_bom: bool = False
+) -> None:
     """Gera arquivo SRT a partir dos segmentos transcritos (UTF-8; opcional BOM para players antigos)."""
-    encoding = 'utf-8-sig' if add_bom else 'utf-8'
-    with open(output_path, 'w', encoding=encoding) as f:
+    encoding = "utf-8-sig" if add_bom else "utf-8"
+    with open(output_path, "w", encoding=encoding) as f:
         idx = 1
         for start, end, text in segments:
             text = normalize_text(text)
@@ -252,17 +269,41 @@ def generate_ass_file(
     out_path: str,
     font: str = "Arial",
     size: int = 36,
-    color: str = "&H00FFFFFF&",       # BGR + AA (ASS)
+    color: str = "&H00FFFFFF&",  # BGR + AA (ASS)
     outline_color: str = "&H00000000&",
     outline: int = 2,
     shadow: int = 1,
-    alignment: int = 5,               # 2=bottom-center, 8=top-center, etc.
+    alignment: int = 5,  # 2=bottom-center, 8=top-center, etc.
     playres_x: int = 1920,
     playres_y: int = 1080,
     margin_v: int = 40,
     subtitle_effect: str = "none",
+    shadow_opacity: float = None,  # Opacidade da sombra (0-1)
+    shadow_blur: float = None,  # Desfoque da sombra (0-1)
+    shadow_distance: int = None,  # Distância da sombra em pixels
+    shadow_angle: int = None,  # Ângulo da sombra em graus
 ) -> None:
     """Gera arquivo ASS estilizado com encoding UTF-8 BOM para compatibilidade."""
+    # Calcular sombra avançada para o estilo CapCut se especificada
+    shadow_x = shadow
+    shadow_y = shadow
+
+    if shadow_distance and shadow_angle is not None:
+        import math
+
+        # Converter ângulo em radianos (CapCut usa ângulo no sentido horário)
+        angle_rad = math.radians(shadow_angle)
+        # Calcular componentes x e y com base na distância e ângulo
+        shadow_x = round(math.cos(angle_rad) * shadow_distance)
+        shadow_y = round(math.sin(angle_rad) * shadow_distance)
+
+    # Aplicar opacidade à sombra se especificada (o formato ASS usa &Haa no começo para alfa)
+    back_colour = "&H64000000&"  # Padrão: alfa 64 (semi-transparente)
+    if shadow_opacity is not None:
+        # Converter opacidade de 0-1 para 00-FF em hexadecimal (invertido, pois 00 é opaco em ASS)
+        alpha_hex = format(round(255 * (1 - shadow_opacity)), "02X")
+        back_colour = f"&H{alpha_hex}000000&"
+
     header = (
         "[Script Info]\n"
         "Title: Auto-generated subtitles\n"
@@ -275,8 +316,8 @@ def generate_ass_file(
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Default,{font},{size},{color},&H00FFFFFF&,{outline_color},&H64000000&,"
-        f"-1,0,0,0,100,100,0,0,1,{outline},{shadow},{alignment},20,20,{margin_v},1\n"
+        f"Style: Default,{font},{size},{color},&H00FFFFFF&,{outline_color},{back_colour},"
+        f"-1,0,0,0,100,100,0,0,1,{outline},{1 if shadow_blur is None else 0},{alignment},20,20,{margin_v},1\n"
         "\n[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
@@ -298,6 +339,8 @@ def generate_ass_file(
             text = text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
             text = text.replace("\n", r"\N")
             text = text.upper()
+
+            # Aplicar efeitos especiais
             if subtitle_effect == "fade_in":
                 text = "{\\fad(1000,0)}" + text
             elif subtitle_effect == "karaoke":
@@ -311,12 +354,24 @@ def generate_ass_file(
                     for w in words:
                         karaoke_text += f"{{\\k{int(dur_per_word*100)}}}{w} "
                     text = karaoke_text.strip()
-            f.write(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,0,0,0,,{text}\n")
+            elif subtitle_effect == "capcut_shadow":
+                # Aplicar efeito de sombra estilo CapCut
+                # Se shadow_blur foi definido, usaremos a tag \blur para desfoque
+                if shadow_blur is not None:
+                    # Converter porcentagem de blur (0-1) para valor absoluto (0-5)
+                    blur_value = round(shadow_blur * 5, 1)
+                    if blur_value > 0:
+                        text = f"{{\\blur{blur_value}}}{text}"
+
+            f.write(
+                f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,0,0,0,,{text}\n"
+            )
 
 
 # ------------------------------------------
 # Presets de legendas estilizadas (CapCut-style)
 # ------------------------------------------
+
 
 def get_subtitle_preset(preset_name: str) -> dict:
     """Retorna configurações de estilo para presets populares do CapCut."""
@@ -329,7 +384,7 @@ def get_subtitle_preset(preset_name: str) -> dict:
             "outline": 3,
             "shadow": 0,
             "alignment": 2,
-            "subtitle_effect": "glow"
+            "subtitle_effect": "glow",
         },
         "glow": {
             "font": "Arial",
@@ -339,7 +394,7 @@ def get_subtitle_preset(preset_name: str) -> dict:
             "outline": 4,
             "shadow": 2,
             "alignment": 2,
-            "subtitle_effect": "glow"
+            "subtitle_effect": "glow",
         },
         "shadow_bold": {
             "font": "Arial Black",
@@ -349,7 +404,7 @@ def get_subtitle_preset(preset_name: str) -> dict:
             "outline": 2,
             "shadow": 4,
             "alignment": 2,
-            "subtitle_effect": "shadow"
+            "subtitle_effect": "shadow",
         },
         "outline_thick": {
             "font": "Impact",
@@ -359,7 +414,7 @@ def get_subtitle_preset(preset_name: str) -> dict:
             "outline": 6,
             "shadow": 1,
             "alignment": 2,
-            "subtitle_effect": "none"
+            "subtitle_effect": "none",
         },
         "retro_3d": {
             "font": "Arial Black",
@@ -369,7 +424,7 @@ def get_subtitle_preset(preset_name: str) -> dict:
             "outline": 3,
             "shadow": 3,
             "alignment": 2,
-            "subtitle_effect": "3d"
+            "subtitle_effect": "3d",
         },
         "minimal": {
             "font": "Arial",
@@ -379,7 +434,7 @@ def get_subtitle_preset(preset_name: str) -> dict:
             "outline": 1,
             "shadow": 1,
             "alignment": 2,
-            "subtitle_effect": "none"
+            "subtitle_effect": "none",
         },
         "gaming": {
             "font": "Arial Black",
@@ -389,7 +444,7 @@ def get_subtitle_preset(preset_name: str) -> dict:
             "outline": 4,
             "shadow": 2,
             "alignment": 2,
-            "subtitle_effect": "gaming"
+            "subtitle_effect": "gaming",
         },
         "cinema": {
             "font": "Times New Roman",
@@ -400,8 +455,22 @@ def get_subtitle_preset(preset_name: str) -> dict:
             "shadow": 2,
             "alignment": 2,
             "margin_v": 80,
-            "subtitle_effect": "fade_in"
-        }
+            "subtitle_effect": "fade_in",
+        },
+        "capcut_shadow": {
+            "font": "Arial",
+            "size": 42,
+            "color": "&H00FFFFFF&",  # Branco
+            "outline_color": "&H00000000&",  # Preto
+            "outline": 0,
+            "shadow": 3,
+            "alignment": 2,
+            "shadow_opacity": 0.9,  # Opacidade 90%
+            "shadow_blur": 0.23,  # Desfoque 23%
+            "shadow_distance": 10,  # Distância 10px
+            "shadow_angle": -78,  # Ângulo -78°
+            "subtitle_effect": "capcut_shadow",
+        },
     }
 
     return presets.get(preset_name, presets["minimal"])
@@ -417,6 +486,12 @@ def generate_ass_file_with_preset(
     """Gera arquivo ASS usando preset estilizado."""
     config = get_subtitle_preset(preset)
 
+    # Configurar parâmetros avançados de sombra se disponíveis
+    shadow_opacity = config.get("shadow_opacity")
+    shadow_blur = config.get("shadow_blur")
+    shadow_distance = config.get("shadow_distance")
+    shadow_angle = config.get("shadow_angle")
+
     generate_ass_file(
         segments=segments,
         out_path=out_path,
@@ -430,13 +505,18 @@ def generate_ass_file_with_preset(
         playres_x=playres_x,
         playres_y=playres_y,
         margin_v=config.get("margin_v", 40),
-        subtitle_effect=config["subtitle_effect"]
+        subtitle_effect=config["subtitle_effect"],
+        shadow_opacity=shadow_opacity,
+        shadow_blur=shadow_blur,
+        shadow_distance=shadow_distance,
+        shadow_angle=shadow_angle,
     )
 
 
 # ------------------------------------------
 # Utilitário de formatação de tempo SRT
 # ------------------------------------------
+
 
 def format_time_srt(seconds: float) -> str:
     """Formata tempo em segundos para formato SRT (HH:MM:SS,mmm)."""

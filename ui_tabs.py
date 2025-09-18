@@ -1,14 +1,26 @@
 # ui_tabs.py
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QFormLayout,
-    QGroupBox, QFileDialog, QListWidget
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+    QDoubleSpinBox,
+    QComboBox,
+    QCheckBox,
+    QFormLayout,
+    QGroupBox,
+    QFileDialog,
+    QListWidget,
 )
 from PySide6.QtCore import Signal, QObject
 
 
 class FileBrowseWidget(QWidget):
     """Widget reutilizável para um campo de texto com um botão 'Procurar'."""
+
     textChanged = Signal(str)
 
     def __init__(self, placeholder="", browse_mode="file", file_filter="Todos (*.*)"):
@@ -31,12 +43,16 @@ class FileBrowseWidget(QWidget):
             self.browse_button.clicked.connect(self._browse_folder)
 
     def _browse_file(self, file_filter):
-        path, _ = QFileDialog.getOpenFileName(self, "Selecionar Arquivo", "", file_filter)
-        if path: self.line_edit.setText(path)
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Selecionar Arquivo", "", file_filter
+        )
+        if path:
+            self.line_edit.setText(path)
 
     def _browse_folder(self):
         path = QFileDialog.getExistingDirectory(self, "Selecionar Pasta")
-        if path: self.line_edit.setText(path)
+        if path:
+            self.line_edit.setText(path)
 
     def text(self):
         return self.line_edit.text()
@@ -55,13 +71,17 @@ class BasicTab(QWidget):
         layout = QFormLayout(self)
         layout.setSpacing(15)
 
-        self.narration_path = FileBrowseWidget("Arquivo de narração (.mp3, .wav)", "file", "Áudios (*.mp3 *.wav)")
+        self.narration_path = FileBrowseWidget(
+            "Arquivo de narração (.mp3, .wav)", "file", "Áudios (*.mp3 *.wav)"
+        )
         self.videos_folder = FileBrowseWidget("Pasta com vídeos ou imagens", "folder")
-        self.output_folder = FileBrowseWidget("Pasta onde o vídeo final será salvo", "folder")
-        self.video_mode = QComboBox();
+        self.output_folder = FileBrowseWidget(
+            "Pasta onde o vídeo final será salvo", "folder"
+        )
+        self.video_mode = QComboBox()
         self.video_mode.addItems(["videos", "images"])
-        self.seed = QSpinBox();
-        self.seed.setRange(-1, 99999);
+        self.seed = QSpinBox()
+        self.seed.setRange(-1, 99999)
         self.seed.setSpecialValueText("Aleatório")
         self.shuffle = QCheckBox("Randomizar ordem dos vídeos/imagens")
 
@@ -83,13 +103,15 @@ class VideoTab(QWidget):
         # Resolução e FPS
         res_group = QGroupBox("Resolução e FPS")
         res_layout = QFormLayout(res_group)
-        self.resolution_preset = QComboBox();
-        self.resolution_preset.addItems(["horizontal_1080p", "horizontal_720p", "vertical_1080p", "custom"])
-        self.width = QSpinBox();
+        self.resolution_preset = QComboBox()
+        self.resolution_preset.addItems(
+            ["horizontal_1080p", "horizontal_720p", "vertical_1080p", "custom"]
+        )
+        self.width = QSpinBox()
         self.width.setRange(320, 3840)
-        self.height = QSpinBox();
+        self.height = QSpinBox()
         self.height.setRange(240, 2160)
-        self.fps = QSpinBox();
+        self.fps = QSpinBox()
         self.fps.setRange(24, 60)
         res_layout.addRow("Preset:", self.resolution_preset)
         res_layout.addRow("Largura:", self.width)
@@ -100,18 +122,18 @@ class VideoTab(QWidget):
         # Encoder
         enc_group = QGroupBox("Encoder")
         enc_layout = QFormLayout(enc_group)
-        self.encoder = QComboBox();
+        self.encoder = QComboBox()
         self.encoder.addItems(["libx264", "h264_nvenc", "h264_amf", "h264_qsv"])
-        self.performance_profile = QComboBox();
+        self.performance_profile = QComboBox()
         self.performance_profile.addItems(["quality", "balanced", "speed"])
-        self.crf = QSpinBox();
+        self.crf = QSpinBox()
         self.crf.setRange(0, 51)
-        self.gpu_quality = QSpinBox();
+        self.gpu_quality = QSpinBox()
         self.gpu_quality.setRange(1, 51)
-        self.preset = QComboBox();
+        self.preset = QComboBox()
         self.preset.addItems(["ultrafast", "medium", "veryslow"])
-        self.threads = QSpinBox();
-        self.threads.setRange(0, 32);
+        self.threads = QSpinBox()
+        self.threads.setRange(0, 32)
         self.threads.setSpecialValueText("Auto")
         enc_layout.addRow("Encoder:", self.encoder)
         enc_layout.addRow("Perfil:", self.performance_profile)
@@ -124,9 +146,9 @@ class VideoTab(QWidget):
         # Modo Imagens
         img_group = QGroupBox("Modo de Imagens")
         img_layout = QFormLayout(img_group)
-        self.image_segment_duration = QDoubleSpinBox();
+        self.image_segment_duration = QDoubleSpinBox()
         self.image_segment_duration.setRange(0.5, 60.0)
-        self.transition_type = QComboBox();
+        self.transition_type = QComboBox()
         self.transition_type.addItems(["none", "fade", "random"])
         img_layout.addRow("Duração por imagem (s):", self.image_segment_duration)
         img_layout.addRow("Transição:", self.transition_type)
@@ -135,14 +157,18 @@ class VideoTab(QWidget):
         # Efeitos Visuais
         fx_group = QGroupBox("Efeitos Visuais")
         fx_layout = QFormLayout(fx_group)
-        self.cinematic_preset = QComboBox();
-        self.cinematic_preset.addItems(["nenhum", "warm", "cold", "vintage", "cinematic"])
-        self.custom_lut_path = FileBrowseWidget("Caminho para LUT personalizado", "file", "LUTs (*.cube)")
+        self.cinematic_preset = QComboBox()
+        self.cinematic_preset.addItems(
+            ["nenhum", "warm", "cold", "vintage", "cinematic"]
+        )
+        self.custom_lut_path = FileBrowseWidget(
+            "Caminho para LUT personalizado", "file", "LUTs (*.cube)"
+        )
         self.enable_vignette = QCheckBox("Habilitar vinheta")
-        self.vignette_intensity = QDoubleSpinBox();
+        self.vignette_intensity = QDoubleSpinBox()
         self.vignette_intensity.setRange(0.0, 1.0)
         self.enable_curves = QCheckBox("Habilitar curvas personalizadas")
-        self.custom_curves = QLineEdit();
+        self.custom_curves = QLineEdit()
         self.custom_curves.setPlaceholderText("Ex: 'r=.../g=.../b=...'")
         fx_layout.addRow("Preset Cinematográfico:", self.cinematic_preset)
         fx_layout.addRow("LUT Personalizado:", self.custom_lut_path)
@@ -155,13 +181,15 @@ class VideoTab(QWidget):
         # Áudio
         audio_group = QGroupBox("Áudio")
         audio_layout = QFormLayout(audio_group)
-        self.background_music = FileBrowseWidget("Música de fundo (opcional)", "file", "Áudios (*.mp3 *.wav)")
-        self.background_music_volume = QDoubleSpinBox();
+        self.background_music = FileBrowseWidget(
+            "Música de fundo (opcional)", "file", "Áudios (*.mp3 *.wav)"
+        )
+        self.background_music_volume = QDoubleSpinBox()
         self.background_music_volume.setRange(0.0, 1.0)
         self.remove_silence = QCheckBox("Remover silêncio da narração")
-        self.silence_threshold = QSpinBox();
+        self.silence_threshold = QSpinBox()
         self.silence_threshold.setRange(-60, -20)
-        self.silence_duration = QDoubleSpinBox();
+        self.silence_duration = QDoubleSpinBox()
         self.silence_duration.setRange(0.1, 2.0)
         audio_layout.addRow("Música de Fundo:", self.background_music)
         audio_layout.addRow("Volume da Música:", self.background_music_volume)
@@ -173,13 +201,17 @@ class VideoTab(QWidget):
         # Abertura e Encerramento
         open_end_group = QGroupBox("Abertura e Encerramento")
         open_end_layout = QFormLayout(open_end_group)
-        self.opening_video_paths_widget = QListWidget()  # Widget para exibir, não para dados
+        self.opening_video_paths_widget = (
+            QListWidget()
+        )  # Widget para exibir, não para dados
         self.add_opening_button = QPushButton("Adicionar Vídeo de Abertura")
         self.remove_opening_button = QPushButton("Remover Selecionado")
-        self.ending_video_path = FileBrowseWidget("Vídeo de encerramento (opcional)", "file", "Vídeos (*.mp4 *.mov)")
+        self.ending_video_path = FileBrowseWidget(
+            "Vídeo de encerramento (opcional)", "file", "Vídeos (*.mp4 *.mov)"
+        )
         open_end_layout.addRow("Vídeos de Abertura:", self.opening_video_paths_widget)
-        btn_layout = QHBoxLayout();
-        btn_layout.addWidget(self.add_opening_button);
+        btn_layout = QHBoxLayout()
+        btn_layout.addWidget(self.add_opening_button)
         btn_layout.addWidget(self.remove_opening_button)
         open_end_layout.addRow(btn_layout)
         open_end_layout.addRow("Vídeo de Encerramento:", self.ending_video_path)
@@ -196,7 +228,7 @@ class VideoTab(QWidget):
             "horizontal_1080p": (1920, 1080),
             "horizontal_720p": (1280, 720),
             "vertical_1080p": (1080, 1920),
-            "custom": (self.width.value(), self.height.value())
+            "custom": (self.width.value(), self.height.value()),
         }
         w, h = presets.get(preset, (1920, 1080))
         self.width.setValue(w)
@@ -205,6 +237,7 @@ class VideoTab(QWidget):
 
 class ChromaItemWidget(QGroupBox):
     """Um widget para configurar um único arquivo de Chroma Key."""
+
     remove_clicked = Signal(QObject)
 
     def __init__(self, index: int):
@@ -212,14 +245,25 @@ class ChromaItemWidget(QGroupBox):
 
         layout = QFormLayout(self)
 
-        self.path = FileBrowseWidget("Arquivo de vídeo (.mp4)", "file", "Vídeos (*.mp4)")
-        self.scale = QDoubleSpinBox();
-        self.scale.setRange(0.1, 2.0);
+        self.path = FileBrowseWidget(
+            "Arquivo de vídeo (.mp4)", "file", "Vídeos (*.mp4)"
+        )
+        self.scale = QDoubleSpinBox()
+        self.scale.setRange(0.1, 2.0)
         self.scale.setSingleStep(0.1)
-        self.position = QComboBox();
-        self.position.addItems(["bottom_center", "center", "top_left", "top_right", "bottom_left", "bottom_right"])
-        self.start = QDoubleSpinBox();
-        self.start.setRange(0, 6000);
+        self.position = QComboBox()
+        self.position.addItems(
+            [
+                "bottom_center",
+                "center",
+                "top_left",
+                "top_right",
+                "bottom_left",
+                "bottom_right",
+            ]
+        )
+        self.start = QDoubleSpinBox()
+        self.start.setRange(0, 6000)
         self.start.setSingleStep(1.0)
         self.remove_button = QPushButton("Remover este Chroma")
 
@@ -243,16 +287,27 @@ class OverlayTab(QWidget):
         # Logo (sem alterações)
         logo_group = QGroupBox("Logo")
         logo_layout = QFormLayout(logo_group)
-        self.logo = FileBrowseWidget("Arquivo de logo (.png)", "file", "Imagens (*.png)")
-        self.logo_scale = QDoubleSpinBox();
-        self.logo_scale.setRange(0.05, 1.0);
+        self.logo = FileBrowseWidget(
+            "Arquivo de logo (.png)", "file", "Imagens (*.png)"
+        )
+        self.logo_scale = QDoubleSpinBox()
+        self.logo_scale.setRange(0.05, 1.0)
         self.logo_scale.setSingleStep(0.05)
-        self.logo_position = QComboBox();
+        self.logo_position = QComboBox()
         self.logo_position.addItems(
-            ["top_right", "top_left", "bottom_right", "bottom_left", "center", "top_center", "bottom_center"])
-        self.logo_x = QSpinBox();
+            [
+                "top_right",
+                "top_left",
+                "bottom_right",
+                "bottom_left",
+                "center",
+                "top_center",
+                "bottom_center",
+            ]
+        )
+        self.logo_x = QSpinBox()
         self.logo_x.setRange(0, 2000)
-        self.logo_y = QSpinBox();
+        self.logo_y = QSpinBox()
         self.logo_y.setRange(0, 2000)
         logo_layout.addRow("Arquivo:", self.logo)
         logo_layout.addRow("Escala:", self.logo_scale)
@@ -264,9 +319,11 @@ class OverlayTab(QWidget):
         # Overlay de Vídeo (sem alterações)
         overlay_group = QGroupBox("Overlay de Vídeo")
         overlay_layout = QFormLayout(overlay_group)
-        self.overlay = FileBrowseWidget("Arquivo de overlay (.mp4)", "file", "Vídeos (*.mp4)")
-        self.overlay_opacity = QDoubleSpinBox();
-        self.overlay_opacity.setRange(0.1, 1.0);
+        self.overlay = FileBrowseWidget(
+            "Arquivo de overlay (.mp4)", "file", "Vídeos (*.mp4)"
+        )
+        self.overlay_opacity = QDoubleSpinBox()
+        self.overlay_opacity.setRange(0.1, 1.0)
         self.overlay_opacity.setSingleStep(0.1)
         overlay_layout.addRow("Arquivo:", self.overlay)
         overlay_layout.addRow("Opacidade:", self.overlay_opacity)
@@ -302,29 +359,55 @@ class SubtitleTab(QWidget):
         # Presets
         preset_group = QGroupBox("Presets Estilizados")
         preset_layout = QFormLayout(preset_group)
-        self.subtitle_preset = QComboBox();
+        self.subtitle_preset = QComboBox()
         self.subtitle_preset.addItems(
-            ["personalizado", "neon", "glow", "shadow_bold", "outline_thick", "retro_3d", "minimal", "gaming",
-             "cinema"])
+            [
+                "personalizado",
+                "neon",
+                "glow",
+                "shadow_bold",
+                "outline_thick",
+                "retro_3d",
+                "minimal",
+                "gaming",
+                "cinema",
+                "capcut_shadow",
+            ]
+        )
         preset_layout.addRow("Preset:", self.subtitle_preset)
         layout.addWidget(preset_group)
 
         # Configurações
         sub_group = QGroupBox("Configurações de Legendas")
         sub_layout = QFormLayout(sub_group)
-        self.subtitle_font_size = QSpinBox();
+        self.subtitle_font_size = QSpinBox()
         self.subtitle_font_size.setRange(10, 150)
-        self.subtitle_color = QComboBox();
-        self.subtitle_color.addItems(["white", "yellow", "black", "red", "green", "blue"])
-        self.subtitle_position = QComboBox();
+        self.subtitle_color = QComboBox()
+        self.subtitle_color.addItems(
+            ["white", "yellow", "black", "red", "green", "blue"]
+        )
+        self.subtitle_position = QComboBox()
         self.subtitle_position.addItems(
-            ["bottom_center", "center", "top_center", "top_left", "top_right", "bottom_left", "bottom_right"])
-        self.subtitle_font = FileBrowseWidget("Fonte da legenda (.ttf, .otf)", "file", "Fontes (*.ttf *.otf)")
-        self.words_per_subtitle = QSpinBox();
+            [
+                "bottom_center",
+                "center",
+                "top_center",
+                "top_left",
+                "top_right",
+                "bottom_left",
+                "bottom_right",
+            ]
+        )
+        self.subtitle_font = FileBrowseWidget(
+            "Fonte da legenda (.ttf, .otf)", "file", "Fontes (*.ttf *.otf)"
+        )
+        self.words_per_subtitle = QSpinBox()
         self.words_per_subtitle.setRange(1, 20)
         self.vosk_model_path = FileBrowseWidget("Pasta do modelo Vosk", "folder")
-        self.subtitle_effect = QComboBox();
-        self.subtitle_effect.addItems(["none", "fade_in", "fill_bar", "karaoke"])
+        self.subtitle_effect = QComboBox()
+        self.subtitle_effect.addItems(
+            ["none", "fade_in", "fill_bar", "karaoke", "capcut_shadow"]
+        )
         sub_layout.addRow("Tamanho da Fonte:", self.subtitle_font_size)
         sub_layout.addRow("Cor:", self.subtitle_color)
         sub_layout.addRow("Posição:", self.subtitle_position)
@@ -337,15 +420,19 @@ class SubtitleTab(QWidget):
         # Estilo
         style_group = QGroupBox("Estilo (Contorno e Sombra)")
         style_layout = QFormLayout(style_group)
-        self.subtitle_outline_color = QComboBox();
-        self.subtitle_outline_color.addItems(["black", "white", "yellow", "red", "green", "blue"])
-        self.subtitle_outline_width = QSpinBox();
+        self.subtitle_outline_color = QComboBox()
+        self.subtitle_outline_color.addItems(
+            ["black", "white", "yellow", "red", "green", "blue"]
+        )
+        self.subtitle_outline_width = QSpinBox()
         self.subtitle_outline_width.setRange(0, 10)
-        self.subtitle_shadow_color = QComboBox();
-        self.subtitle_shadow_color.addItems(["black", "white", "yellow", "red", "green", "blue"])
-        self.subtitle_shadow_x = QSpinBox();
+        self.subtitle_shadow_color = QComboBox()
+        self.subtitle_shadow_color.addItems(
+            ["black", "white", "yellow", "red", "green", "blue"]
+        )
+        self.subtitle_shadow_x = QSpinBox()
         self.subtitle_shadow_x.setRange(-10, 10)
-        self.subtitle_shadow_y = QSpinBox();
+        self.subtitle_shadow_y = QSpinBox()
         self.subtitle_shadow_y.setRange(-10, 10)
         style_layout.addRow("Cor do Contorno:", self.subtitle_outline_color)
         style_layout.addRow("Largura do Contorno:", self.subtitle_outline_width)
@@ -354,5 +441,134 @@ class SubtitleTab(QWidget):
         style_layout.addRow("Sombra Y:", self.subtitle_shadow_y)
         layout.addWidget(style_group)
 
+        # Conecta o evento de mudança de preset para atualizar os campos
+        self.subtitle_preset.currentTextChanged.connect(self._update_subtitle_fields)
+
+        # Conecta os sinais dos campos para mudar para modo personalizado quando alterados
+        self._connect_field_signals()
+
         # CORREÇÃO: addStretch() agora funciona no QVBoxLayout
         layout.addStretch()
+
+    def _update_subtitle_fields(self, preset_name):
+        """
+        Atualiza os campos de legendas com base no preset selecionado.
+        Se o preset for 'personalizado', mantém os valores atuais.
+        """
+        if preset_name == "personalizado":
+            return
+
+        # Importa a função get_subtitle_preset para obter as configurações do preset
+        from subtitle_utils import get_subtitle_preset
+
+        # Temporariamente desconecta os sinais para evitar loops
+        self._disconnect_field_signals()
+
+        try:
+            # Obtem as configurações do preset selecionado
+            config = get_subtitle_preset(preset_name)
+
+            # Atualiza os campos da interface com base no preset
+            if "size" in config:
+                self.subtitle_font_size.setValue(config["size"])
+
+            if "color" in config:
+                # Converte a cor do formato ASS para o nome da cor
+                color_mapping = {
+                    "&H00FFFFFF&": "white",
+                    "&H0000FFFF&": "yellow",
+                    "&H00000000&": "black",
+                    "&H000000FF&": "red",
+                    "&H0000FF00&": "green",
+                    "&H00FF0000&": "blue",
+                    "&H00FF00FF&": "pink",
+                }
+                color_name = color_mapping.get(config["color"], "white")
+                index = self.subtitle_color.findText(color_name)
+                if index >= 0:
+                    self.subtitle_color.setCurrentIndex(index)
+
+            if "alignment" in config:
+                # Mapeia o alinhamento ASS para o posicionamento da interface
+                alignment_mapping = {
+                    2: "bottom_center",
+                    5: "center",
+                    8: "top_center",
+                    7: "top_left",
+                    9: "top_right",
+                    1: "bottom_left",
+                    3: "bottom_right",
+                }
+                position = alignment_mapping.get(config["alignment"], "bottom_center")
+                index = self.subtitle_position.findText(position)
+                if index >= 0:
+                    self.subtitle_position.setCurrentIndex(index)
+
+            if "outline" in config:
+                self.subtitle_outline_width.setValue(config["outline"])
+
+            if "shadow" in config:
+                # Calcula os valores X e Y com base na configuração de sombra
+                shadow_x = config.get("shadow_distance", 0)
+                shadow_y = config.get("shadow_distance", 0)
+
+                # Se há informações de ângulo e distância, calcula X e Y
+                if "shadow_angle" in config and "shadow_distance" in config:
+                    import math
+
+                    angle_rad = math.radians(config["shadow_angle"])
+                    shadow_x = round(math.cos(angle_rad) * config["shadow_distance"])
+                    shadow_y = round(math.sin(angle_rad) * config["shadow_distance"])
+                else:
+                    shadow_x = shadow_y = config["shadow"]
+
+                self.subtitle_shadow_x.setValue(shadow_x)
+                self.subtitle_shadow_y.setValue(shadow_y)
+
+            if "subtitle_effect" in config:
+                index = self.subtitle_effect.findText(config["subtitle_effect"])
+                if index >= 0:
+                    self.subtitle_effect.setCurrentIndex(index)
+        finally:
+            # Reconecta os sinais
+            self._connect_field_signals()
+
+    def _set_to_custom(self):
+        """Define o preset como personalizado quando um campo é alterado manualmente."""
+        if self.subtitle_preset.currentText() != "personalizado":
+            # Temporariamente desconecta o sinal para evitar loops
+            self.subtitle_preset.blockSignals(True)
+
+            # Configura o preset como personalizado
+            index = self.subtitle_preset.findText("personalizado")
+            if index >= 0:
+                self.subtitle_preset.setCurrentIndex(index)
+
+            # Reconecta o sinal
+            self.subtitle_preset.blockSignals(False)
+
+    def _connect_field_signals(self):
+        """Conecta os sinais de todos os campos de legendas para detectar alterações manuais."""
+        self.subtitle_font_size.valueChanged.connect(self._set_to_custom)
+        self.subtitle_color.currentTextChanged.connect(self._set_to_custom)
+        self.subtitle_position.currentTextChanged.connect(self._set_to_custom)
+        self.subtitle_font.textChanged.connect(self._set_to_custom)
+        self.subtitle_outline_color.currentTextChanged.connect(self._set_to_custom)
+        self.subtitle_outline_width.valueChanged.connect(self._set_to_custom)
+        self.subtitle_shadow_color.currentTextChanged.connect(self._set_to_custom)
+        self.subtitle_shadow_x.valueChanged.connect(self._set_to_custom)
+        self.subtitle_shadow_y.valueChanged.connect(self._set_to_custom)
+        self.subtitle_effect.currentTextChanged.connect(self._set_to_custom)
+
+    def _disconnect_field_signals(self):
+        """Desconecta os sinais de todos os campos de legendas."""
+        self.subtitle_font_size.blockSignals(True)
+        self.subtitle_color.blockSignals(True)
+        self.subtitle_position.blockSignals(True)
+        self.subtitle_font.blockSignals(True)
+        self.subtitle_outline_color.blockSignals(True)
+        self.subtitle_outline_width.blockSignals(True)
+        self.subtitle_shadow_color.blockSignals(True)
+        self.subtitle_shadow_x.blockSignals(True)
+        self.subtitle_shadow_y.blockSignals(True)
+        self.subtitle_effect.blockSignals(True)

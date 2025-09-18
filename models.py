@@ -35,7 +35,7 @@ class ConfigModel:
     narration_path: str = ""
     videos_folder: str = ""
     output_folder: str = ""  # Usado pela UI, mas não passado diretamente para a função
-    seed: int = -1
+    seed: int | None = None
     shuffle: bool = True
     video_mode: str = "videos"
     image_segment_duration: float = 6.0
@@ -101,6 +101,9 @@ class ConfigModel:
         data = asdict(self)
         # Garante que a lista de chromas seja uma lista de dicionários
         data['chroma_list'] = [asdict(c) for c in self.chroma_list]
+        # Garante explicitamente que None seja preservado no JSON como null
+        if self.seed is None:
+            data['seed'] = None
         return data
 
     def save(self, filepath="config.json"):

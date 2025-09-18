@@ -46,7 +46,11 @@ def list_images(folder: Path) -> List[Path]:
 def pick_image_segments_to_cover(audio_dur: float, images: List[Path], image_segment_duration: float, seed: int | None = None, shuffle: bool = True):
     """Selects images to cover the audio duration, each shown for image_segment_duration seconds."""
     import random
-    rng = random.Random(seed) if seed is not None and shuffle else random
+    # Se seed for None e shuffle True, use um seed realmente aleatório
+    if seed is None and shuffle:
+        rng = random.Random()
+    else:
+        rng = random.Random(seed) if shuffle else random
     if not images:
         raise ValueError("A pasta de imagens está vazia.")
     chosen = []
