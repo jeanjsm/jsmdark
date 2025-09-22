@@ -1,17 +1,29 @@
-import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, Any, List as TList, Optional
-from audio_utils import duration_seconds
-from subtitle_utils import group_words_by_count, extract_audio_for_transcription, transcribe_audio, generate_ass_file
-from video_utils import list_videos, pick_segments_to_cover, list_images, pick_image_segments_to_cover
+
 import random
 import hashlib
 import time
 import tempfile
 import os
 import glob
-from ffmpeg_utils import run, get_ffmpeg_path
+
+# Local (relative) imports
+from .audio_utils import duration_seconds
+from .subtitle_utils import (
+    group_words_by_count,
+    extract_audio_for_transcription,
+    transcribe_audio,
+    generate_ass_file,
+)
+from .video_utils import (
+    list_videos,
+    pick_segments_to_cover,
+    list_images,
+    pick_image_segments_to_cover,
+)
+from .ffmpeg_utils import run, get_ffmpeg_path
 
 
 class FilterBuilder:
@@ -273,7 +285,7 @@ class OverlayStage(PipelineStage):
         inputs += ["-stream_loop", "-1", "-t", str(audio_duration), "-i", str(overlay)]
 
         overlay_filter = (
-            f"[{overlay_idx}:v]format=rgba,scale={width}:{height}:flags=lanczos," 
+            f"[{overlay_idx}:v]format=rgba,scale={width}:{height},"
             f"colorchannelmixer=aa={overlay_opacity}[ol];"
             f"{map_out}[ol]overlay=0:0:format=auto[vfinal]"
         )
@@ -316,7 +328,7 @@ class LogoStage(PipelineStage):
         logo_x, logo_y = pos_map.get(logo_position, (20, 20))
 
         logo_filter = (
-            f"[{logo_idx}:v]scale=iw*{logo_scale}:ih*{logo_scale}:flags=lanczos[logo];"
+            f"[{logo_idx}:v]scale=iw*{logo_scale}:ih*{logo_scale}[logo];"
             f"{map_out}[logo]overlay=x={logo_x}:y={logo_y}:format=auto[vlogo]"
         )
         filter_builder.add_filter(logo_filter)
@@ -377,7 +389,7 @@ class ChromaStage(PipelineStage):
 
             chroma_filter = (
                 f"[{chroma_idx}:v]trim=start=0:end={chroma_duration},setpts=PTS+{chroma_start}/TB,"
-                f"colorkey=0x00FF00:0.3:0.2,scale=iw*{chroma_scale}:ih*{chroma_scale}:flags=lanczos[chroma{chroma_idx}];"
+                f"colorkey=0x00FF00:0.3:0.2,scale=iw*{chroma_scale}:ih*{chroma_scale}[chroma{chroma_idx}];"
                 f"{last_map}[chroma{chroma_idx}]overlay=x={chroma_x}:y={chroma_y}:"
                 f"enable='between(t,{chroma_start},{chroma_end})':format=auto[vchroma{chroma_idx}]"
             )
@@ -701,7 +713,7 @@ class ImageCacheStage(PipelineStage):
         # Pré-renderização simples sem efeitos - apenas escala e padding
         video_filter = (
             f"fps={fps},"
-            f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease:flags=lanczos," 
+            f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease,"
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
             f"setsar=1"
         )
@@ -776,7 +788,7 @@ class MediaCacheStage(PipelineStage):
             # Se ainda não existe, gera o vídeo escalado
             if not out.exists():
                 # Monta o filtro de vídeo (scale+pad)
-                vf = (f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos," 
+                vf = (f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
                       f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
                       f"setsar=1")
 
