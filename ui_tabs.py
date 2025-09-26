@@ -202,8 +202,12 @@ class VideoTab(QWidget):
         self.image_segment_duration.setRange(MIN_IMAGE_SEGMENT_DURATION, MAX_IMAGE_SEGMENT_DURATION)
         self.transition_type = QComboBox()
         self.transition_type.addItems(["none", "fade", "random"])
+        self.enable_ken_burns = QCheckBox("Habilitar efeito Ken Burns")
+        self.enable_ken_burns.setToolTip("Aplica movimento de câmera (zoom e panorâmica) nas imagens para criar dinamismo")
+        self.enable_ken_burns.setChecked(True)  # Habilitado por padrão
         img_layout.addRow("Duração por imagem (s):", self.image_segment_duration)
         img_layout.addRow("Transição:", self.transition_type)
+        img_layout.addRow(self.enable_ken_burns)
         layout.addWidget(img_group)
 
         # Efeitos Visuais

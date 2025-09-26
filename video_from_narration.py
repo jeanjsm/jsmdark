@@ -71,6 +71,7 @@ def create_video_from_narration(
     preset: str = DEFAULT_PRESET,
     video_mode: str = "videos",
     image_segment_duration: float = DEFAULT_IMAGE_SEGMENT_DURATION,
+    enable_ken_burns: bool = True,  # Novo parâmetro para controlar efeito Ken Burns
     overlay: Optional[str] = None,
     overlay_opacity: float = DEFAULT_OVERLAY_OPACITY,
     logo: Optional[str] = None,
@@ -167,6 +168,7 @@ def create_video_from_narration(
             "preset": preset,
             "video_mode": video_mode,
             "image_segment_duration": image_segment_duration,
+            "enable_ken_burns": enable_ken_burns,  # Adicionar ao contexto do pipeline
             "overlay": overlay,
             "overlay_opacity": overlay_opacity,
             "logo": logo,
@@ -312,6 +314,7 @@ if __name__ == "__main__":
         preset=args.preset,
         video_mode=args.video_mode,
         image_segment_duration=args.image_segment_duration,
+        enable_ken_burns=args.enable_ken_burns,  # Adicionar parâmetro Ken Burns
         overlay=args.overlay,
         overlay_opacity=args.overlay_opacity,
         logo=args.logo,

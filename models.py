@@ -61,6 +61,7 @@ class ConfigModel:
     shuffle: bool = True
     video_mode: str = "videos"
     image_segment_duration: float = 6.0
+    enable_ken_burns: bool = True  # Controla se aplica efeito Ken Burns nas imagens
 
     # Parâmetros de vídeo e encoder
     fps: int = 30
