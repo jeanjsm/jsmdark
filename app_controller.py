@@ -93,7 +93,7 @@ class AppController(QObject):
 
         # Remover chaves que são apenas da UI e não da função de processamento
         params.pop("output_folder", None)
-        params.pop("resolution_preset", None)
+        # resolution_preset should be passed to the pipeline to respect custom resolutions
 
         # Converter a lista de ChromaConfig para uma lista de dicionários
         params["chroma_list"] = [asdict(c) for c in self.model.chroma_list]

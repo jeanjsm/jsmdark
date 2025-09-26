@@ -277,6 +277,11 @@ class VideoTab(QWidget):
 
         # Atualização automática de width/height ao mudar o preset de resolução
         self.resolution_preset.currentTextChanged.connect(self._update_resolution)
+
+        # Atualização automática do preset para "custom" quando width/height são alterados manualmente
+        self.width.valueChanged.connect(self._set_resolution_to_custom)
+        self.height.valueChanged.connect(self._set_resolution_to_custom)
+
         self._update_resolution(self.resolution_preset.currentText())
 
     def _update_resolution(self, preset):
@@ -287,8 +292,23 @@ class VideoTab(QWidget):
             "custom": (self.width.value(), self.height.value()),
         }
         w, h = presets.get(preset, (1920, 1080))
+
+        # Block signals to prevent infinite loop when updating values
+        self.width.blockSignals(True)
+        self.height.blockSignals(True)
+
         self.width.setValue(w)
         self.height.setValue(h)
+
+        self.width.blockSignals(False)
+        self.height.blockSignals(False)
+
+    def _set_resolution_to_custom(self):
+        """Automatically set resolution preset to 'custom' when width or height is manually changed."""
+        if self.resolution_preset.currentText() != "custom":
+            self.resolution_preset.blockSignals(True)
+            self.resolution_preset.setCurrentText("custom")
+            self.resolution_preset.blockSignals(False)
 
 
 class ChromaItemWidget(QGroupBox):
@@ -339,7 +359,7 @@ class OverlayTab(QWidget):
         super().__init__()
         layout = QVBoxLayout(self)
 
-        # Logo (sem alterações)
+        # Logo
         logo_group = QGroupBox("Logo")
         logo_layout = QFormLayout(logo_group)
         self.logo = FileBrowseWidget(
@@ -371,7 +391,7 @@ class OverlayTab(QWidget):
         logo_layout.addRow("Offset Y:", self.logo_y)
         layout.addWidget(logo_group)
 
-        # Overlay de Vídeo (sem alterações)
+        # Overlay de Vídeo
         overlay_group = QGroupBox("Overlay de Vídeo")
         overlay_layout = QFormLayout(overlay_group)
         self.overlay = FileBrowseWidget(
@@ -384,7 +404,7 @@ class OverlayTab(QWidget):
         overlay_layout.addRow("Opacidade:", self.overlay_opacity)
         layout.addWidget(overlay_group)
 
-        # Chroma Keys (MODIFICADO)
+        # Chroma Keys
         self.chroma_group = QGroupBox("Lista de Chroma Keys")
         main_chroma_layout = QVBoxLayout(self.chroma_group)
 
@@ -405,7 +425,6 @@ class SubtitleTab(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        # CORREÇÃO: Usar QVBoxLayout como layout principal para suportar addStretch()
         layout = QVBoxLayout(self)
 
         self.enable_subtitles = QCheckBox("Habilitar legendas automáticas")
@@ -489,11 +508,28 @@ class SubtitleTab(QWidget):
         self.subtitle_shadow_x.setRange(-10, 10)
         self.subtitle_shadow_y = QSpinBox()
         self.subtitle_shadow_y.setRange(-10, 10)
+
+        # Camera shake effects
+        self.camera_shake_enabled = QCheckBox("Habilitar tremulação da câmera")
+        self.camera_shake_intensity = QDoubleSpinBox()
+        self.camera_shake_intensity.setRange(0.1, 10.0)
+        self.camera_shake_intensity.setValue(2.0)
+        self.camera_shake_frequency = QDoubleSpinBox()
+        self.camera_shake_frequency.setRange(0.1, 5.0)
+        self.camera_shake_frequency.setValue(1.0)
+        self.camera_shake_duration = QDoubleSpinBox()
+        self.camera_shake_duration.setRange(0.1, 2.0)
+        self.camera_shake_duration.setValue(0.5)
+
         style_layout.addRow("Cor do Contorno:", self.subtitle_outline_color)
         style_layout.addRow("Largura do Contorno:", self.subtitle_outline_width)
         style_layout.addRow("Cor da Sombra:", self.subtitle_shadow_color)
         style_layout.addRow("Sombra X:", self.subtitle_shadow_x)
         style_layout.addRow("Sombra Y:", self.subtitle_shadow_y)
+        style_layout.addRow(self.camera_shake_enabled)
+        style_layout.addRow("Intensidade:", self.camera_shake_intensity)
+        style_layout.addRow("Frequência:", self.camera_shake_frequency)
+        style_layout.addRow("Duração:", self.camera_shake_duration)
         layout.addWidget(style_group)
 
         # Conecta o evento de mudança de preset para atualizar os campos
@@ -502,7 +538,6 @@ class SubtitleTab(QWidget):
         # Conecta os sinais dos campos para mudar para modo personalizado quando alterados
         self._connect_field_signals()
 
-        # CORREÇÃO: addStretch() agora funciona no QVBoxLayout
         layout.addStretch()
 
     def _update_subtitle_fields(self, preset_name):

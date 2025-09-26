@@ -63,6 +63,7 @@ class VideoBaseStage(PipelineStage):
     """Estágio base: seleciona segmentos, chama o cache apropriado e gera concat."""
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        print(f"  - Resolução: {ctx['width']}x{ctx['height']}")
         narration_path = ctx["narration_path"]
         videos_folder = ctx["videos_folder"]
         seed = ctx["seed"]
@@ -171,6 +172,7 @@ class TransitionStage(PipelineStage):
     ]
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        print(f"  - Resolução: {ctx['width']}x{ctx['height']}")
         transition = ctx.get("transition_type", "none")
         fb = ctx["filter_builder"]
         segments = ctx["segments"]
@@ -240,26 +242,37 @@ class TransitionStage(PipelineStage):
 
 
 class OverlayStage(PipelineStage):
-    """Overlay melhorado com duração garantida"""
+    """Overlay melhorado com duração garantida e resolução dinâmica."""
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         if not ctx.get("overlay"):
             return ctx
+        print(f"  - Resolução: {ctx['width']}x{ctx['height']}")
         overlay = ctx["overlay"]
         overlay_opacity = ctx["overlay_opacity"]
         filter_builder = ctx["filter_builder"]
         inputs = ctx["inputs"]
-        width = ctx.get("width", 1920)
-        height = ctx.get("height", 1080)
+
+        # --- INÍCIO DA CORREÇÃO DEFINITIVA ---
+        # Pega a largura e altura DIRETAMENTE do contexto.
+        # Se não estiverem lá, algo está errado no início do pipeline e deve falhar.
+        width = ctx["width"]
+        height = ctx["height"]
+        # --- FIM DA CORREÇÃO DEFINITIVA ---
+
         map_out = ctx["map_out"]
         audio_duration = ctx["audio_duration"]
+
         overlay_idx = sum(1 for x in inputs if x == "-i")
         inputs += ["-stream_loop", "-1", "-t", str(audio_duration), "-i", str(overlay)]
+
+        # O filtro de overlay agora usa a resolução correta do projeto.
         overlay_filter = (
             f"[{overlay_idx}:v]format=rgba,scale={width}:{height}:flags=lanczos,"
             f"colorchannelmixer=aa={overlay_opacity}[ol];"
             f"{map_out}[ol]overlay=0:0:format=auto[vfinal]"
         )
+
         filter_builder.add_filter(overlay_filter)
         filter_builder.set_output("[vfinal]")
         ctx["inputs"] = inputs
@@ -268,21 +281,31 @@ class OverlayStage(PipelineStage):
 
 
 class LogoStage(PipelineStage):
-    """Estágio de logo adaptado para FilterBuilder"""
+    """Estágio de logo adaptado para FilterBuilder, respeitando a resolução."""
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         if not ctx.get("logo"):
             return ctx
+        print(f"  - Resolução: {ctx['width']}x{ctx['height']}")
         logo = ctx["logo"]
         logo_scale = ctx.get("logo_scale", 0.15)
         logo_position = ctx.get("logo_position", "top_right")
         filter_builder = ctx["filter_builder"]
         inputs = ctx["inputs"]
         map_out = ctx["map_out"]
+
+        # --- INÍCIO DA CORREÇÃO ---
+        # Pega a largura e altura do contexto para garantir consistência.
+        width = ctx["width"]
+        height = ctx["height"]
+        # --- FIM DA CORREÇÃO ---
+
         logo_idx = sum(1 for x in inputs if x == "-i")
         inputs += ["-i", str(logo)]
+
         pos_map = {
-            "top_left": (20, 20), "top_center": (f"(main_w-overlay_w)/2", 20),
+            "top_left": (20, 20),
+            "top_center": (f"(main_w-overlay_w)/2", 20),
             "top_right": (f"main_w-overlay_w-20", 20),
             "bottom_left": (20, f"main_h-overlay_h-20"),
             "bottom_center": (f"(main_w-overlay_w)/2", f"main_h-overlay_h-20"),
@@ -290,10 +313,14 @@ class LogoStage(PipelineStage):
             "center": (f"(main_w-overlay_w)/2", f"(main_h-overlay_h)/2"),
         }
         logo_x, logo_y = pos_map.get(logo_position, (20, 20))
+
+        # O filtro agora está ciente da resolução do projeto, embora não a defina diretamente.
+        # Isso ajuda na negociação de filtros do FFmpeg.
         logo_filter = (
             f"[{logo_idx}:v]scale=iw*{logo_scale}:ih*{logo_scale}:flags=lanczos[logo];"
             f"{map_out}[logo]overlay=x={logo_x}:y={logo_y}:format=auto[vlogo]"
         )
+
         filter_builder.add_filter(logo_filter)
         filter_builder.set_output("[vlogo]")
         ctx["inputs"] = inputs
@@ -305,6 +332,7 @@ class ChromaStage(PipelineStage):
     """Estágio de chroma key adaptado para FilterBuilder"""
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        print(f"  - Resolução: {ctx['width']}x{ctx['height']}")
         chroma_list = ctx.get("chroma_list")
         if not chroma_list and ctx.get("chroma"):
             chroma_list = [{"path": ctx["chroma"], "scale": ctx.get("chroma_scale", 0.5),
@@ -356,6 +384,7 @@ class CinematicStage(PipelineStage):
     }
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        print(f"  - Resolução: {ctx['width']}x{ctx['height']}")
         cinematic_preset = ctx.get("cinematic_preset")
         if not cinematic_preset:
             return ctx
@@ -389,6 +418,7 @@ class SubtitleStage(PipelineStage):
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         if not ctx.get("enable_subtitles"):
             return ctx
+        print(f"  - Resolução: {ctx['width']}x{ctx['height']}")
         narration_path = ctx["narration_path"]
         subtitle_font_size = ctx.get("subtitle_font_size", 24)
         subtitle_color = ctx.get("subtitle_color", "white")
@@ -398,6 +428,10 @@ class SubtitleStage(PipelineStage):
         vosk_model_path = ctx.get("vosk_model_path", "_internal/vosk_models/vosk-model-pt")
         filter_builder = ctx["filter_builder"]
         map_out = ctx["map_out"]
+
+        width = ctx.get("width")
+        height = ctx.get("height")
+
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio, \
                 tempfile.NamedTemporaryFile(suffix=".ass", delete=False) as temp_ass:
             temp_audio_path = temp_audio.name
@@ -417,7 +451,7 @@ class SubtitleStage(PipelineStage):
                 generate_ass_file(grouped, ass_file_path, font=subtitle_font, size=subtitle_font_size, color=color_ass,
                                   outline_color=outline_color_ass, outline=ctx.get("subtitle_outline_width", 2),
                                   shadow=ctx.get("subtitle_shadow_x", 2), alignment=alignment,
-                                  playres_x=ctx.get("width", 1920), playres_y=ctx.get("height", 1080))
+                                  playres_x=width, playres_y=height)
                 ass_path_escaped = str(Path(ass_file_path)).replace('\\', '\\\\').replace(':', '\\:')
                 subtitle_filter = f"{map_out}subtitles=filename='{ass_path_escaped}'[vsubtitles]"
                 filter_builder.add_filter(subtitle_filter)
@@ -433,6 +467,7 @@ class ImageCacheStage(PipelineStage):
     """Pré-renderiza imagens em vídeos curtos para cache com efeito Ken Burns CONFIÁVEL."""
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        print(f"  - Resolução: {ctx['width']}x{ctx['height']}")
         segments = ctx.get("segments", [])
         if not segments:
             ctx["cached_media"] = {}
@@ -563,6 +598,13 @@ class MediaCacheStage(PipelineStage):
     """Pré-renderiza mídias (vídeos) em cache para resolução uniforme."""
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        # --- INÍCIO DA CORREÇÃO ---
+        # Pega a largura e altura DIRETAMENTE do contexto, sem valores padrão.
+        width = ctx["width"]
+        height = ctx["height"]
+        print(f"  - Resolução lida pelo MediaCacheStage: {width}x{height}")
+        # --- FIM DA CORREÇÃO ---
+
         segments = ctx.get("segments", [])
         if not segments:
             ctx["cached_media"] = {}
@@ -570,7 +612,7 @@ class MediaCacheStage(PipelineStage):
 
         cache_dir = Path(ctx["out_path"]).parent / "cache"
         cache_dir.mkdir(exist_ok=True)
-        width, height = ctx["width"], ctx["height"]
+
         fps = ctx["fps"]
         encoder_config = ctx.get("encoder_config", {})
         cached = {}
@@ -583,7 +625,7 @@ class MediaCacheStage(PipelineStage):
             cached[src] = str(out)
 
             if not out.exists():
-                print(f"Criando cache para: {Path(src).name}")
+                print(f"Criando cache para: {Path(src).name} em {width}x{height}")
                 vf = (f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,"
                       f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1")
                 cmd = [get_ffmpeg_path(), "-y", "-hide_banner", "-loglevel", "error", "-i", str(src), "-vf", vf, "-an"]
@@ -611,13 +653,22 @@ class MediaCacheStage(PipelineStage):
 class EncoderStage(PipelineStage):
     """Configura encoder, resolução e parâmetros de qualidade"""
     RESOLUTION_PRESETS = {
-        "horizontal_1080p": (1920, 1080), "vertical_1080p": (1080, 1920),
+        "horizontal_1080p": (1920, 1080),
+        "horizontal_720p": (1280, 720),
+        "vertical_1080p": (1080, 1920),
     }
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        print(f"  - Resolução: {ctx['width']}x{ctx['height']}")
         resolution_preset = ctx.get("resolution_preset", "horizontal_1080p")
-        if resolution_preset in self.RESOLUTION_PRESETS:
+
+        # Only override resolution if preset is not "custom" and exists in presets
+        if resolution_preset != "custom" and resolution_preset in self.RESOLUTION_PRESETS:
             ctx["width"], ctx["height"] = self.RESOLUTION_PRESETS[resolution_preset]
+            print(f"  - Resolução ajustada pelo preset '{resolution_preset}': {ctx['width']}x{ctx['height']}")
+        else:
+            print(f"  - Usando resolução personalizada: {ctx['width']}x{ctx['height']}")
+
         encoder = ctx.get("encoder", "libx264")
         performance_profile = ctx.get("performance_profile", "quality")
         threads = ctx.get("threads", 0)
@@ -643,6 +694,7 @@ class BackgroundMusicStage(PipelineStage):
     """Estágio que adiciona trilha de fundo ao áudio"""
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        print(f"  - Resolução: {ctx['width']}x{ctx['height']}")
         background_music = ctx.get("background_music")
         if not background_music:
             return ctx
@@ -663,6 +715,7 @@ class OutputStage(PipelineStage):
     """Estágio de saída com filter_complex centralizado"""
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        print(f"  - Resolução: {ctx['width']}x{ctx['height']}")
         print("Iniciando renderização final...")
         start_time = time.time()
 
@@ -754,6 +807,7 @@ class EndingStage(PipelineStage):
     """Adiciona vídeo de encerramento, usando a MediaCacheStage para garantir a resolução correta."""
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        print(f"  - Resolução: {ctx['width']}x{ctx['height']}")
         ending_video_path = ctx.get("ending_video_path")
         if not ending_video_path:
             return ctx
@@ -810,51 +864,83 @@ class EndingStage(PipelineStage):
 
 
 class OpeningStage(PipelineStage):
-    """Estágio que adiciona vídeos de abertura no início do vídeo principal"""
+    """Estágio que adiciona vídeos de abertura, respeitando a resolução do projeto."""
 
     def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        print(f"  - Resolução: {ctx['width']}x{ctx['height']}")
         opening_video_paths = ctx.get("opening_video_paths", [])
         if not opening_video_paths:
             return ctx
+
         print(f"Adicionando {len(opening_video_paths)} vídeo(s) de abertura")
+
         fb = ctx["filter_builder"]
         map_out = ctx.get("map_out", "[vout]")
         audio_duration = ctx["audio_duration"]
+
+        # --- INÍCIO DA CORREÇÃO ---
+        # Pega a largura e altura do contexto para usar no redimensionamento.
         width = ctx["width"]
         height = ctx["height"]
+        # --- FIM DA CORREÇÃO ---
+
         opening_total_duration = 0
         opening_labels = []
         inputs = ctx["inputs"]
+
         for i, path in enumerate(opening_video_paths):
             if not os.path.exists(path):
                 print(f"Aviso: Arquivo de abertura não encontrado: {path}")
                 continue
+
             video_idx = sum(1 for x in inputs if x == "-i")
             inputs.extend(["-i", str(path)])
-            duration = duration_seconds(path)
+
+            try:
+                duration = duration_seconds(path)
+            except Exception as e:
+                print(f"Aviso: Não foi possível obter a duração de {path}. Usando 5 segundos. Erro: {e}")
+                duration = 5.0
+
             opening_total_duration += duration
             in_lbl = f"{video_idx}:v"
             out_lbl = f"opening_{i}"
+
+            # --- INÍCIO DA CORREÇÃO ---
+            # Usa as variáveis width e height para redimensionar o vídeo de abertura.
             fb.add_filter(
                 f"[{in_lbl}]scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setpts=PTS-STARTPTS[{out_lbl}]"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,setpts=PTS-STARTPTS[{out_lbl}]"
             )
+            # --- FIM DA CORREÇÃO ---
+
             opening_labels.append(out_lbl)
+
         ctx["inputs"] = inputs
+
         if not opening_labels:
             return ctx
+
         if len(opening_labels) > 1:
             concat_lbls = "".join(f"[{l}]" for l in opening_labels)
             fb.add_filter(f"{concat_lbls}concat=n={len(opening_labels)}:v=1:a=0[opening_concat]")
             opening_output = "opening_concat"
         else:
             opening_output = opening_labels[0]
+
         map_out_clean = map_out.strip("[]")
-        adjusted_duration = max(0.1, audio_duration - opening_total_duration)
-        fb.add_filter(f"[{map_out_clean}]trim=duration={adjusted_duration}[main_adjusted]")
-        fb.add_filter(f"[{opening_output}][main_adjusted]concat=n=2:v=1:a=0[vout_with_opening]")
+
+        # Ajusta a duração do vídeo principal para dar espaço à abertura
+        adjusted_duration = max(0.1, audio_duration)  # O vídeo principal deve ter a duração da narração
+
+        # O vídeo principal já tem a duração correta, não precisa de trim aqui.
+        # Apenas concatenamos a abertura com o vídeo principal.
+        fb.add_filter(f"[{opening_output}][{map_out_clean}]concat=n=2:v=1:a=0[vout_with_opening]")
+
+        # A duração total do vídeo agora é a abertura + narração.
+        ctx["audio_duration"] += opening_total_duration
         ctx["map_out"] = "[vout_with_opening]"
-        ctx["opening_total_duration"] = opening_total_duration
+
         return ctx
 
 
