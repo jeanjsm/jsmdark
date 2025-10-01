@@ -5,7 +5,7 @@ import logging
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QProgressBar, QMessageBox, QListWidget, QTextEdit, QSplitter,
-    QGroupBox, QTabWidget, QScrollArea
+    QGroupBox, QTabWidget, QScrollArea, QFormLayout
 )
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtCore import Qt
@@ -78,9 +78,13 @@ class VideoGeneratorGUI(QMainWindow):
         self.generate_button = QPushButton("Gerar Vídeo Único")
         self.add_to_queue_button = QPushButton("Adicionar à Fila")
         self.save_config_button = QPushButton("Salvar Configurações")
+        self.manage_slots_button = QPushButton("Gerenciar Save Slots")
+        self.quick_save_button = QPushButton("Save Rápido")
         action_buttons_layout.addWidget(self.generate_button)
         action_buttons_layout.addWidget(self.add_to_queue_button)
         action_buttons_layout.addWidget(self.save_config_button)
+        action_buttons_layout.addWidget(self.manage_slots_button)
+        action_buttons_layout.addWidget(self.quick_save_button)
         config_layout.addLayout(action_buttons_layout)
 
         splitter.addWidget(self.config_panel)

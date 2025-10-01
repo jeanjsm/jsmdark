@@ -12,9 +12,11 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QComboBox,
     QFileDialog,
+    QInputDialog,
 )
 from PySide6.QtGui import QColor, QTextCursor
 from PySide6.QtCore import QObject
+from save_slot_dialog import SaveSlotDialog
 from models import ConfigModel, QueueItem, ChromaConfig
 from ui_main_window import VideoGeneratorGUI
 from threads import ProcessVideoThread, QueueWorkerThread
@@ -47,11 +49,22 @@ class AppController(QObject):
         self.is_processing_queue = False
         self.chroma_widgets: list[ChromaItemWidget] = []
 
+        # Connect new save slot buttons
+        self.view.manage_slots_button.clicked.connect(self.show_save_slot_dialog)
+        self.view.quick_save_button.clicked.connect(self.quick_save_slot)
+        
+
     def connect_signals(self) -> None:
         """Connects UI signals to controller methods."""
         self.view.generate_button.clicked.connect(self.generate_single_video)
+        
+        # Connect save slot buttons
+        self.view.manage_slots_button.clicked.connect(self.show_save_slot_dialog)
+        self.view.quick_save_button.clicked.connect(self.quick_save_slot)
+        
         self.view.add_to_queue_button.clicked.connect(self.add_to_queue)
         self.view.save_config_button.clicked.connect(self.save_config)
+        
         self.view.start_queue_button.clicked.connect(self.start_queue_processing)
         self.view.stop_queue_button.clicked.connect(self.stop_queue_processing)
         self.view.clear_queue_button.clicked.connect(self.clear_queue)
@@ -452,6 +465,145 @@ class AppController(QObject):
     def log_message(self, message: str):
         self.view.log_text.append(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
         self.view.log_text.moveCursor(QTextCursor.MoveOperation.End)
+
+    def show_save_slot_dialog(self) -> None:
+        """Show the save slot management dialog."""
+        try:
+            dialog = SaveSlotDialog(self.view)
+            dialog.slot_selected.connect(self.load_save_slot)
+            dialog.slot_saved.connect(self._on_slot_saved)
+            dialog.exec()
+        except Exception as exc:
+            logging.error(f"Error showing save slot dialog: {exc}")
+            self.log_message(f"❌ Erro ao abrir diálogo de save slots: {exc}")
+
+    def quick_save_slot(self) -> None:
+        """Create a quick save slot with timestamp-based name."""
+        try:
+            # Update model with current UI values
+            self.update_model_from_ui()
+            self.model.width = self.view.video_tab.width.value()
+            self.model.height = self.view.video_tab.height.value()
+            self.model.fps = self.view.video_tab.fps.value()
+            
+            # Generate timestamp-based name
+            timestamp = datetime.now().strftime("%d-%m-%Y %H:%M")
+            default_name = f"Config {timestamp}"
+            
+            # Ask user for name with pre-filled default
+            slot_name, ok = QInputDialog.getText(
+                self.view,
+                "Save Rápido",
+                "Nome para a configuração:",
+                text=default_name
+            )
+            
+            if not ok or not slot_name.strip():
+                return
+            
+            slot_name = slot_name.strip()
+            
+            # Check if slot already exists
+            existing_slots = ConfigModel.list_save_slots()
+            for slot in existing_slots:
+                if slot['name'].lower() == slot_name.lower():
+                    reply = QMessageBox.question(
+                        self.view,
+                        "Slot Já Existe",
+                        f"Um slot com o nome '{slot_name}' já existe. Deseja substituí-lo?",
+                        QMessageBox.Yes | QMessageBox.No
+                    )
+                    if reply != QMessageBox.Yes:
+                        return
+                    break
+            
+            # Garante que o seed seja None quando for -1
+            if hasattr(self.view.basic_tab, 'seed') and self.view.basic_tab.seed.value() == -1:
+                self.model.seed = None
+            
+            success = self.model.save_slot(slot_name)
+            
+            if success:
+                self.log_message(f"✅ Save slot '{slot_name}' criado com sucesso!")
+                QMessageBox.information(self.view, "Sucesso", f"Configuração salva como '{slot_name}'!")
+            else:
+                self.log_message(f"❌ Erro ao criar save slot '{slot_name}'")
+                QMessageBox.warning(self.view, "Erro", "Falha ao salvar a configuração.")
+                
+        except Exception as exc:
+            logging.error(f"Error in quick save: {exc}")
+            self.log_message(f"❌ Erro no save rápido: {exc}")
+            QMessageBox.critical(self.view, "Erro", f"Erro ao criar save rápido: {exc}")
+
+    def load_save_slot(self, slot_name: str) -> None:
+        """Load configuration from a save slot.
+        
+        Args:
+            slot_name (str): Name of the save slot to load
+        """
+        try:
+            # Load the configuration from slot
+            loaded_config = ConfigModel.load_slot(slot_name)
+            
+            # Replace current model
+            self.model = loaded_config
+            
+            # Update UI with loaded configuration
+            self.update_ui_from_model()
+            
+            # Update chroma widgets
+            self._update_chroma_widgets_from_model()
+            
+            # Update opening video paths
+            self._update_opening_videos_from_model()
+            
+            self.log_message(f"✅ Configuração '{slot_name}' carregada com sucesso!")
+            
+        except Exception as exc:
+            logging.error(f"Error loading save slot '{slot_name}': {exc}")
+            self.log_message(f"❌ Erro ao carregar slot '{slot_name}': {exc}")
+            QMessageBox.critical(self.view, "Erro", f"Erro ao carregar configuração: {exc}")
+
+    def _on_slot_saved(self, slot_name: str) -> None:
+        """Handle slot saved event.
+        
+        Args:
+            slot_name (str): Name of the saved slot
+        """
+        self.log_message(f"✅ Save slot '{slot_name}' salvo via diálogo!")
+
+    def _update_chroma_widgets_from_model(self) -> None:
+        """Update chroma widgets based on model data."""
+        try:
+            # Clear existing chroma widgets
+            for widget in self.chroma_widgets:
+                widget.setParent(None)
+                widget.deleteLater()
+            self.chroma_widgets.clear()
+            
+            # Create new widgets based on model
+            for i, chroma_config in enumerate(self.model.chroma_list):
+                widget = ChromaItemWidget(i)
+                widget.path.setText(chroma_config.path)
+                widget.scale.setValue(chroma_config.scale)
+                widget.position.setCurrentText(chroma_config.position)
+                widget.start.setValue(chroma_config.start)
+                widget.remove_clicked.connect(self._remove_chroma_widget)
+                
+                self.view.overlay_tab.chroma_list_layout.addWidget(widget)
+                self.chroma_widgets.append(widget)
+                
+        except Exception as exc:
+            logging.error(f"Error updating chroma widgets from model: {exc}")
+
+    def _update_opening_videos_from_model(self) -> None:
+        """Update opening videos list based on model data."""
+        try:
+            self.view.video_tab.opening_video_paths_widget.clear()
+            for video_path in self.model.opening_video_paths:
+                self.view.video_tab.opening_video_paths_widget.addItem(video_path)
+        except Exception as exc:
+            logging.error(f"Error updating opening videos from model: {exc}")
 
     def _add_opening_video(self):
         path, _ = QFileDialog.getOpenFileName(

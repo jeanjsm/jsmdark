@@ -16,7 +16,7 @@ from ffmpeg_utils import run
 from pipeline import (
     MediaPipeline, VideoBaseStage, OverlayStage, LogoStage, ChromaStage, TransitionStage,
     SubtitleStage, CinematicStage, ImageCacheStage, EncoderStage, OutputStage, BackgroundMusicStage,
-    EndingStage, MediaCacheStage, OpeningStage
+    EndingStage, MediaCacheStage, OpeningStage, VignetteStage
 )
 
 # Named constants for magic numbers
@@ -150,6 +150,7 @@ def create_video_from_narration(
             LogoStage(),
             ChromaStage(),
             CinematicStage(),
+            VignetteStage(),
             SubtitleStage(),
             BackgroundMusicStage(),
             EndingStage(),

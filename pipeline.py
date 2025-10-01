@@ -412,6 +412,53 @@ class CinematicStage(PipelineStage):
         return ctx
 
 
+class VignetteStage(PipelineStage):
+    """
+    Domain-driven implementation of vignette effect stage.
+
+    This stage applies a vignette effect (edge darkening) using proper FFmpeg syntax
+    and domain validation through the VignetteEffect value object.
+    """
+
+    def __call__(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        # Domain rule: Only execute if vignette is enabled
+        if not ctx.get("enable_vignette"):
+            return ctx
+
+        print("Aplicando efeito de vinheta...")
+
+        filter_builder = ctx["filter_builder"]
+        map_out = ctx["map_out"]
+
+        try:
+            # Create domain object with validation
+            from models import VignetteEffect
+
+            intensity = ctx.get("vignette_intensity", 0.3)
+            vignette_effect = VignetteEffect(intensity=intensity)
+
+            # Generate valid FFmpeg filter using domain object
+            vignette_filter = vignette_effect.to_ffmpeg_filter(map_out, "[vvignette]")
+
+            filter_builder.add_filter(vignette_filter)
+
+            # Update pipeline context
+            new_map_out = "[vvignette]"
+            filter_builder.set_output(new_map_out)
+            ctx["map_out"] = new_map_out
+
+        except ValueError as e:
+            print(f"Erro na configuração do vinheta: {e}")
+            # Skip vignette if configuration is invalid
+            pass
+        except Exception as e:
+            print(f"Erro inesperado ao aplicar vinheta: {e}")
+            # Skip vignette on any other error
+            pass
+
+        return ctx
+
+
 class SubtitleStage(PipelineStage):
     """Estágio de legendas adaptado para FilterBuilder"""
 
