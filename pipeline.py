@@ -14,6 +14,19 @@ import glob
 from ffmpeg_utils import run, get_ffmpeg_path
 
 
+def get_cache_dir() -> Path:
+    """Retorna o diretório de cache na raiz do projeto.
+
+    Returns:
+        Path: Caminho para o diretório cache/ na raiz do projeto.
+    """
+    # Obtém a raiz do projeto (mesmo nível deste arquivo: pipeline.py)
+    project_root = Path(__file__).parent
+    cache_dir = project_root / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    return cache_dir
+
+
 class FilterBuilder:
     """Centraliza a construção de filtros complexos do FFmpeg."""
 
@@ -107,7 +120,8 @@ class VideoBaseStage(PipelineStage):
 
             # Calcula quantos segmentos de imagem são necessários para cobrir a duração do áudio.
             # A função `pick_image_segments_to_cover` já faz isso, então podemos confiar nela.
-            total_duration_needed = audio_dur + safety_margin
+            extra = max(0, int(audio_dur / image_segment_duration) - 1) * 1.5 if transition != "none" else 0
+            total_duration_needed = audio_dur + extra + safety_margin
             segments = pick_image_segments_to_cover(total_duration_needed, imgs, image_segment_duration, seed=seed,
                                                     shuffle=shuffle)
 
@@ -525,9 +539,8 @@ class ImageCacheStage(PipelineStage):
         print(f"Iniciando pré-renderização de cache para imagens com efeito Ken Burns (Método Confiável)...")
         start_time = time.time()
 
-        out_path = ctx["out_path"]
-        cache_dir = Path(out_path).parent / "cache"
-        cache_dir.mkdir(exist_ok=True)
+        # Usa o diretório de cache na raiz do projeto
+        cache_dir = get_cache_dir()
 
         image_segment_duration = ctx["image_segment_duration"]
         fps = ctx["fps"]
@@ -657,8 +670,8 @@ class MediaCacheStage(PipelineStage):
             ctx["cached_media"] = {}
             return ctx
 
-        cache_dir = Path(ctx["out_path"]).parent / "cache"
-        cache_dir.mkdir(exist_ok=True)
+        # Usa o diretório de cache na raiz do projeto
+        cache_dir = get_cache_dir()
 
         fps = ctx["fps"]
         encoder_config = ctx.get("encoder_config", {})
