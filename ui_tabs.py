@@ -430,6 +430,12 @@ class SubtitleTab(QWidget):
         self.enable_subtitles = QCheckBox("Habilitar legendas automáticas")
         layout.addWidget(self.enable_subtitles)
 
+        # Novo campo: seleção de arquivo SRT externo
+        self.srt_file = FileBrowseWidget(
+            "Arquivo de legenda SRT (opcional)", "file", "Legendas (*.srt)"
+        )
+        layout.addWidget(self.srt_file)
+
         # Presets
         preset_group = QGroupBox("Presets Estilizados")
         preset_layout = QFormLayout(preset_group)
@@ -539,6 +545,10 @@ class SubtitleTab(QWidget):
         self._connect_field_signals()
 
         layout.addStretch()
+
+    def get_srt_path(self) -> str:
+        """Retorna o caminho do arquivo SRT selecionado, se houver."""
+        return self.srt_file.text().strip()
 
     def _update_subtitle_fields(self, preset_name):
         """

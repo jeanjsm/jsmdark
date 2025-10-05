@@ -150,3 +150,34 @@ class VideoGeneratorGUI(QMainWindow):
             event (Optional[object]): The close event object.
         """
         pass
+
+    def _collect_params(self) -> dict:
+        """Coleta todos os parâmetros das abas, incluindo o caminho do SRT."""
+        params = {}
+        # Exemplo de coleta dos campos principais (adapte conforme necessário)
+        params["narration_path"] = self.basic_tab.narration_path.text().strip()
+        params["videos_folder"] = self.basic_tab.videos_folder.text().strip()
+        params["out_path"] = self.basic_tab.output_folder.text().strip()
+        params["video_mode"] = self.basic_tab.video_mode.currentText()
+        params["seed"] = self.basic_tab.seed.value() if self.basic_tab.seed.value() != -1 else None
+        params["shuffle"] = self.basic_tab.shuffle.isChecked()
+        # ...coleta dos demais campos das outras abas...
+        # Legendas
+        params["enable_subtitles"] = self.subtitle_tab.enable_subtitles.isChecked()
+        params["subtitle_font_size"] = self.subtitle_tab.subtitle_font_size.value()
+        params["subtitle_color"] = self.subtitle_tab.subtitle_color.currentText()
+        params["subtitle_position"] = self.subtitle_tab.subtitle_position.currentText()
+        params["subtitle_font"] = self.subtitle_tab.subtitle_font.text().strip()
+        params["words_per_subtitle"] = self.subtitle_tab.words_per_subtitle.value()
+        params["vosk_model_path"] = self.subtitle_tab.vosk_model_path.text().strip()
+        params["subtitle_outline_color"] = self.subtitle_tab.subtitle_outline_color.currentText()
+        params["subtitle_outline_width"] = self.subtitle_tab.subtitle_outline_width.value()
+        params["subtitle_shadow_color"] = self.subtitle_tab.subtitle_shadow_color.currentText()
+        params["subtitle_shadow_x"] = self.subtitle_tab.subtitle_shadow_x.value()
+        params["subtitle_shadow_y"] = self.subtitle_tab.subtitle_shadow_y.value()
+        params["subtitle_effect"] = self.subtitle_tab.subtitle_effect.currentText()
+        # Novo: caminho do SRT
+        srt_path = self.subtitle_tab.get_srt_path()
+        params["srt_path"] = srt_path if srt_path else None
+        # ...coleta dos demais campos das outras abas...
+        return params

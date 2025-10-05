@@ -493,11 +493,45 @@ class SubtitleStage(PipelineStage):
         width = ctx.get("width")
         height = ctx.get("height")
 
+        import os
+        import tempfile
+        from subtitle_utils import generate_ass_file
+
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio, \
                 tempfile.NamedTemporaryFile(suffix=".ass", delete=False) as temp_ass:
             temp_audio_path = temp_audio.name
             ass_file_path = temp_ass.name
         try:
+            # Novo fluxo: se ctx['subtitles'] existir, usa as legendas do SRT
+            if ctx.get("subtitles"):
+                alignment_map = {"bottom_center": 2, "bottom_left": 1, "bottom_right": 3, "center": 5, "top_left": 7,
+                                 "top_center": 8, "top_right": 9}
+                alignment = alignment_map.get(subtitle_position, 2)
+                color_ass_map = {"white": "&H00FFFFFF&", "yellow": "&H0000FFFF&", "red": "&H000000FF&",
+                                 "blue": "&H00FF0000&", "green": "&H0000FF00&", "black": "&H00000000&"}
+                color_ass = color_ass_map.get(subtitle_color, "&H00FFFFFF&")
+                outline_color_ass = color_ass_map.get(ctx.get("subtitle_outline_color", "black"), "&H00000000&")
+                # Usa as legendas já agrupadas do SRT
+                generate_ass_file(
+                    ctx["subtitles"],
+                    ass_file_path,
+                    font=subtitle_font,
+                    size=subtitle_font_size,
+                    color=color_ass,
+                    outline_color=outline_color_ass,
+                    outline=ctx.get("subtitle_outline_width", 2),
+                    shadow=ctx.get("subtitle_shadow_x", 2),
+                    alignment=alignment,
+                    playres_x=width,
+                    playres_y=height
+                )
+                ass_path_escaped = str(Path(ass_file_path)).replace('\\', '\\\\').replace(':', '\\:')
+                subtitle_filter = f"{map_out}subtitles=filename='{ass_path_escaped}'[vsubtitles]"
+                filter_builder.add_filter(subtitle_filter)
+                ctx["map_out"] = "[vsubtitles]"
+                ctx["subtitle_file"] = ass_file_path
+                return ctx
+            # Fluxo padrão: usa Vosk
             extract_audio_for_transcription(narration_path, temp_audio_path)
             segments = transcribe_audio(temp_audio_path, vosk_model_path)
             if segments:

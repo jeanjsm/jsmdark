@@ -117,6 +117,7 @@ def create_video_from_narration(
     ending_video_path: Optional[str] = None,
     opening_video_paths: Optional[TList[str]] = None,
     progress_callback: Optional[Callable[[int], None]] = None,
+    srt_path: Optional[str] = None,  # Novo parâmetro opcional para .srt
 ) -> Any:
     """
     Generates a video from a narration audio file and media folder.
@@ -213,6 +214,35 @@ def create_video_from_narration(
             "opening_video_paths": opening_video_paths if opening_video_paths else [],
             "progress_callback": progress_callback,
         }
+        # Novo bloco: tenta carregar o .srt se fornecido
+        if srt_path:
+            import srt
+            from datetime import timedelta
+            try:
+                with open(srt_path, 'r', encoding='utf-8') as f:
+                    srt_content = f.read()
+                subtitles = list(srt.parse(srt_content))
+                def to_seconds(val):
+                    if hasattr(val, 'total_seconds'):
+                        return float(val.total_seconds())
+                    if isinstance(val, str):
+                        # Tenta converter string para timedelta
+                        try:
+                            h, m, s = val.replace(',', '.').split(':')
+                            s, ms = s.split('.') if '.' in s else (s, '0')
+                            return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+                        except Exception:
+                            return 0.0
+                    return float(val) if isinstance(val, (int, float)) else 0.0
+                # Formato correto: lista de tuplas (start, end, text) compatível com generate_ass_file
+                ctx["subtitles"] = [
+                    (to_seconds(sub.start), to_seconds(sub.end), sub.content)
+                    for sub in subtitles
+                ]
+                logging.info(f"Legendas carregadas do SRT: {len(ctx['subtitles'])} entradas")
+            except Exception as e:
+                logging.error(f"Erro ao processar o arquivo SRT: {e}. Fallback para Vosk.")
+
         pipeline = MediaPipeline(stages)
         return pipeline.run(ctx)
     except Exception as exc:
@@ -344,7 +374,7 @@ if __name__ == "__main__":
         cinematic_preset=args.cinematic_preset,
         custom_lut_path=args.custom_lut_path,
         enable_vignette=args.enable_vignette,
-        vignette_intensity=args.vignette_intensity,
+        vignette_intensity=args.vignette_intensidade,
         enable_curves=args.enable_curves,
         custom_curves=args.custom_curves,
         remove_silence=args.remove_silence,

@@ -111,6 +111,10 @@ class AppController(QObject):
         # Converter a lista de ChromaConfig para uma lista de dicionários
         params["chroma_list"] = [asdict(c) for c in self.model.chroma_list]
 
+        # Adiciona o caminho do SRT, se houver, coletando da UI
+        srt_path = self.view.subtitle_tab.get_srt_path()
+        params["srt_path"] = srt_path if srt_path else None
+
         return params
 
     def generate_single_video(self):
