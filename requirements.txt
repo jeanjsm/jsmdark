@@ -1,0 +1,45 @@
+# Video FFmpeg Tools - Requirements
+# Python 3.12 compatible versions
+
+# GUI Framework
+PySide6>=6.6.0,<6.8.0
+
+# Audio/Video Processing (requires ffmpeg installed separately)
+# Note: ffmpeg and ffprobe binaries should be in PATH or in _internal/ffmpeg/bin/
+
+# Machine Learning / AI
+torch>=2.1.0,<2.5.0
+torchaudio>=2.1.0,<2.5.0
+
+# Whisper implementations (at least one required for subtitle generation)
+# Option 1: Faster and more efficient (recommended)
+faster-whisper>=1.0.0,<1.1.0
+
+# Option 2: Original OpenAI implementation (alternative)
+# openai-whisper>=20231117
+
+# Speech Recognition
+vosk>=0.3.45,<0.4.0
+
+# Subtitle processing
+srt>=3.5.0,<4.0.0
+
+# Utilities
+requests>=2.31.0,<3.0.0
+tqdm>=4.66.0,<5.0.0
+websockets>=12.0,<13.0
+
+# Testing (development)
+pytest>=7.4.0,<9.0.0
+pytest-mock>=3.12.0,<4.0.0
+pytest-asyncio>=0.21.0,<1.0.0
+
+# Code Quality (development)
+black>=23.12.0,<25.0.0
+ruff>=0.1.0,<1.0.0
+isort>=5.13.0,<6.0.0
+mypy>=1.7.0,<2.0.0
+
+# Type stubs
+types-requests>=2.31.0,<3.0.0
+
