@@ -92,10 +92,18 @@ class LauncherApp(tk.Tk):
             command=self._launch_video_creator,
         )
 
-        # Tool 3: Whisper Subtitle Generator (whisper_subtitle_gui.py)
+        # Tool 3: CapCut Audio Exporter (exportar_audio_capcut.py)
         self._create_tool_card(
             tools_frame,
-            title="Whisper Subtitle Generator",
+            title="🎵 CapCut Audio Exporter",
+            description="Extraia e processe áudios de projetos CapCut\nJunte áudios e remova silêncios automaticamente",
+            command=self._launch_capcut_exporter,
+        )
+
+        # Tool 4: Whisper Subtitle Generator (whisper_subtitle_gui.py)
+        self._create_tool_card(
+            tools_frame,
+            title="🗣️ Whisper Subtitle Generator",
             description="Transcreva áudio para legendas SRT\nusando Whisper AI",
             command=self._launch_whisper,
         )
@@ -191,6 +199,10 @@ class LauncherApp(tk.Tk):
     def _launch_video_creator(self) -> None:
         """Launch the video creator application."""
         self._launch_script("video_creator.py", "Criador de Vídeos")
+
+    def _launch_capcut_exporter(self) -> None:
+        """Launch the CapCut audio exporter application."""
+        self._launch_script("exportar_audio_capcut.py", "CapCut Audio Exporter")
 
     def _launch_whisper(self) -> None:
         """Launch the Whisper subtitle generator application."""
