@@ -130,14 +130,17 @@ class VideoBaseStage(PipelineStage):
             raise ValueError("Nenhum segmento válido encontrado após a seleção.")
         ctx["segments"] = segments
 
-        # A chamada de cache está correta
-        cache_ctx = ctx.copy()
+        # Para vídeos, não fazer cache - usar os arquivos originais diretamente
         if video_mode == "videos":
-            cache_ctx = MediaCacheStage()(cache_ctx)
+            print("Modo vídeos: usando arquivos originais sem cache")
+            cached = {src: src for src, _ in segments}
+            ctx["cached_media"] = cached
         else:
+            # Para imagens, continuar usando cache com efeito Ken Burns
+            cache_ctx = ctx.copy()
             cache_ctx = ImageCacheStage()(cache_ctx)
+            ctx["cached_media"] = cache_ctx["cached_media"]
 
-        ctx["cached_media"] = cache_ctx["cached_media"]
         cached = ctx["cached_media"]
 
         # Monta inputs e o arquivo concat.txt CORRETAMENTE
