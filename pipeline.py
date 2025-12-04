@@ -824,8 +824,18 @@ class OutputStage(PipelineStage):
         encoder_config = ctx.get("encoder_config", {})
         audio_duration = ctx["audio_duration"]
 
-        # Determina o mapeamento de áudio correto
-        audio_map = f"[{audio_idx}]" if isinstance(audio_idx, str) else f"[{audio_idx}:a]"
+        # CORREÇÃO: Determina o mapeamento de áudio correto
+        # Se audio_idx for numérico, precisamos criar um label no filter_complex primeiro
+        if audio_idx == "aout":
+            audio_map = "[aout]"
+        elif audio_idx == "afinal_ending":
+            audio_map = "[afinal_ending]"
+        elif isinstance(audio_idx, str):
+            audio_map = f"[{audio_idx}]"
+        else:
+            # Para índices numéricos, copiamos o stream para um label no filter_complex
+            audio_map = "[main_audio]"
+            filter_builder.add_filter(f"[{audio_idx}:a]acopy[main_audio]")
 
         # Processamento de áudio com música de fundo, se houver
         background_music_idx = ctx.get("background_music_idx")
@@ -945,7 +955,15 @@ class EndingStage(PipelineStage):
         # Concatena os fluxos corretos
         video_concat = f"{main_video_ref}{ending_video_ref}concat=n=2:v=1:a=0[vfinal_ending]"
 
-        main_audio_ref = f"[{audio_idx}]" if isinstance(audio_idx, str) else f"[{audio_idx}:a]"
+        # Corrige o mapeamento de áudio para evitar erro quando audio_idx é numérico
+        if isinstance(audio_idx, str):
+            main_audio_ref = f"[{audio_idx}]"
+        else:
+            # Se audio_idx é numérico, precisamos copiar o stream para um label primeiro
+            main_audio_label = "[main_audio_copy]"
+            filter_builder.add_filter(f"[{audio_idx}:a]acopy{main_audio_label}")
+            main_audio_ref = main_audio_label
+
         audio_concat = f"{main_audio_ref}{ending_audio_ref}concat=n=2:v=0:a=1[afinal_ending]"
 
         filter_builder.add_filter(video_concat)
