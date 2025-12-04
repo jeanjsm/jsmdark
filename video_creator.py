@@ -30,13 +30,24 @@ def get_ffmpeg_path():
         sys.exit(1)
 
 
+def get_resolution_from_format(video_format):
+    """Retorna largura e altura baseado no formato."""
+    if video_format == "16:9":
+        return 1920, 1080
+    else:  # 9:16
+        return 1080, 1920
+
+
 def create_video_from_images(
         image_folder, output_path, duration_per_image, use_ken_burns, sequential,
-        crf, preset, fade_enabled, fade_duration, max_duration, progress_callback, log_callback
+        crf, preset, fade_enabled, fade_duration, max_duration, video_format, progress_callback, log_callback
 ):
     """Cria um vídeo a partir de uma pasta de imagens."""
     log_callback(f"Iniciando criação de vídeo a partir de imagens...", "info")
     log_callback(f"Pasta: {image_folder}", "debug")
+    log_callback(
+        f"Formato: {video_format} ({get_resolution_from_format(video_format)[0]}x{get_resolution_from_format(video_format)[1]})",
+        "info")
 
     ffmpeg_path = get_ffmpeg_path()
     image_path = Path(image_folder)
@@ -72,6 +83,17 @@ def create_video_from_images(
 
     log_callback(f"Processando {total_images} imagens...", "info")
 
+    # Estima tempo aproximado
+    estimated_time_per_image = 2 if use_ken_burns else 1  # segundos
+    estimated_total = estimated_time_per_image * total_images
+    log_callback(f"⏱️ Tempo estimado: ~{estimated_total // 60}min {estimated_total % 60}s", "info")
+
+    import time
+    start_time = time.time()
+
+    # Obtém resolução baseada no formato
+    width, height = get_resolution_from_format(video_format)
+
     with open(concat_list_path, "w", encoding="utf-8") as f_concat:
         for i, img_file in enumerate(image_files):
             temp_output = Path(f"./temp_clip_{i}.mp4")
@@ -82,8 +104,8 @@ def create_video_from_images(
             # Filtro de vídeo com fade
             if use_ken_burns:
                 zoom = 1.2
-                scaled_w = int(1920 * zoom)
-                scaled_h = int(1080 * zoom)
+                scaled_w = int(width * zoom)
+                scaled_h = int(height * zoom)
 
                 effects = [
                     {'x': f'(iw-ow)*(t/{duration_per_image})', 'y': '(ih-oh)/2'},
@@ -96,10 +118,10 @@ def create_video_from_images(
 
                 vf = (
                     f"scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=increase,"
-                    f"crop=w=1920:h=1080:x='{pan_x}':y='{pan_y}',"
+                    f"crop=w={width}:h={height}:x='{pan_x}':y='{pan_y}',"
                 )
             else:
-                vf = "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,"
+                vf = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
 
             # Adiciona fade in/out
             if fade_duration > 0:
@@ -110,7 +132,9 @@ def create_video_from_images(
             cmd = [
                 ffmpeg_path, "-y", "-loop", "1", "-t", str(duration_per_image),
                 "-i", str(img_file), "-vf", vf, "-c:v", "libx264",
-                "-preset", preset, "-crf", str(crf), "-r", "30", "-an", str(temp_output)
+                "-preset", preset, "-crf", str(crf), "-r", "30",
+                "-threads", "0",  # Usa todos os cores disponíveis
+                "-an", str(temp_output)
             ]
 
             cmd_str = ' '.join(str(c) for c in cmd)
@@ -127,13 +151,16 @@ def create_video_from_images(
                 for line in relevant_errors:
                     if line.strip():
                         log_callback(f"  {line}", "debug")
-            else:
-                log_callback(f"  ✓ {img_file.name} processado com sucesso!", "debug")
+            elif i % 5 == 0 or i == total_images - 1:  # Log a cada 5 imagens ou na última
+                log_callback(f"  ✓ Processadas {i + 1} de {total_images} imagens...", "debug")
 
             f_concat.write(f"file '{temp_output.resolve()}'\n")
             progress_callback(int((i + 1) * progress_step))
 
     log_callback("Concatenando clipes...", "info")
+
+    elapsed_time = int(time.time() - start_time)
+    log_callback(f"⏱️ Processamento de imagens concluído em {elapsed_time // 60}min {elapsed_time % 60}s", "success")
 
     # Comando final para concatenar
     final_cmd = [
@@ -193,11 +220,15 @@ def get_video_duration(video_path, ffmpeg_path):
 
 def create_video_from_videos_direct(
         video_folder, output_path, num_videos, sequential,
-        max_duration, progress_callback, log_callback
+        max_duration, video_format, progress_callback, log_callback
 ):
     """Concatena vídeos diretamente sem recodificação (muito mais rápido)."""
     log_callback(f"Usando CONCATENAÇÃO DIRETA (sem recodificação)", "info")
     log_callback(f"Pasta: {video_folder}", "debug")
+    log_callback(
+        f"Formato: {video_format} ({get_resolution_from_format(video_format)[0]}x{get_resolution_from_format(video_format)[1]})",
+        "info")
+    log_callback(f"⚠️ AVISO: Concatenação direta mantém a resolução original dos vídeos!", "warning")
 
     ffmpeg_path = get_ffmpeg_path()
     video_path = Path(video_folder)
@@ -274,12 +305,16 @@ def create_video_from_videos_direct(
 
 def create_video_from_videos(
         video_folder, output_path, num_videos, sequential,
-        crf, preset, fade_enabled, fade_duration, max_duration, video_speed, progress_callback, log_callback
+        crf, preset, fade_enabled, fade_duration, max_duration, video_speed, video_format, progress_callback,
+        log_callback
 ):
     """Cria um vídeo a partir de uma pasta de outros vídeos."""
     log_callback(f"Iniciando criação de vídeo a partir de outros vídeos...", "info")
     log_callback(f"Pasta: {video_folder}", "debug")
     log_callback(f"Velocidade dos vídeos: {video_speed}x", "info")
+    log_callback(
+        f"Formato: {video_format} ({get_resolution_from_format(video_format)[0]}x{get_resolution_from_format(video_format)[1]})",
+        "info")
 
     ffmpeg_path = get_ffmpeg_path()
     video_path = Path(video_folder)
@@ -312,6 +347,12 @@ def create_video_from_videos(
 
     log_callback(f"Processando {total_videos} vídeos...", "info")
 
+    import time
+    start_time = time.time()
+
+    # Obtém resolução baseada no formato
+    width, height = get_resolution_from_format(video_format)
+
     with open(concat_list_path, "w", encoding="utf-8") as f_concat:
         for i, vid_file in enumerate(selected_videos):
             temp_output = Path(f"./temp_clip_{i}.ts")
@@ -328,7 +369,7 @@ def create_video_from_videos(
                 adjusted_duration = video_duration / video_speed
 
             # Filtro de vídeo com velocidade e fade
-            vf = "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,"
+            vf = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
 
             # Aplica filtro de velocidade se diferente de 1.0
             if video_speed != 1.0:
@@ -388,6 +429,7 @@ def create_video_from_videos(
 
             cmd.extend([
                 "-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-r", "30",
+                "-threads", "0",  # Usa todos os cores disponíveis
                 "-c:a", "aac", "-b:a", "192k",
                 str(temp_output)
             ])
@@ -407,11 +449,16 @@ def create_video_from_videos(
                 for line in relevant_errors:
                     if line.strip():
                         log_callback(f"  {line}", "debug")
+            elif i % 3 == 0 or i == total_videos - 1:  # Log a cada 3 vídeos ou no último
+                log_callback(f"  ✓ Processados {i + 1} de {total_videos} vídeos...", "debug")
 
             f_concat.write(f"file '{temp_output.resolve()}'\n")
             progress_callback(int((i + 1) * progress_step))
 
     log_callback("Concatenando vídeos...", "info")
+
+    elapsed_time = int(time.time() - start_time)
+    log_callback(f"⏱️ Processamento de vídeos concluído em {elapsed_time // 60}min {elapsed_time % 60}s", "success")
 
     # Comando final para concatenar
     final_cmd = [
@@ -459,7 +506,7 @@ class VideoCreatorApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Criador de Vídeos Avançado")
-        self.geometry("600x920")
+        self.geometry("600x980")
 
         # Variáveis de estado
         self.mode = tk.StringVar(value="images")
@@ -479,6 +526,7 @@ class VideoCreatorApp(tk.Tk):
         self.preset_value = tk.StringVar(value="fast")
         self.fade_enabled = tk.BooleanVar(value=True)
         self.fade_duration = tk.DoubleVar(value=0.5)
+        self.video_format = tk.StringVar(value="16:9")
 
         # Estilo
         style = ttk.Style(self)
@@ -541,15 +589,58 @@ class VideoCreatorApp(tk.Tk):
         self.max_duration_entry.pack(side="left")
         ttk.Label(duration_container, text="(0 = sem limite)").pack(side="left", padx=5)
 
-        # 6. Opções Específicas do Modo
-        self.options_frame = ttk.LabelFrame(main_frame, text="6. Opções do Modo")
+        # 6. Formato do Vídeo
+        format_frame = ttk.LabelFrame(main_frame, text="6. Formato do Vídeo")
+        format_frame.pack(fill="x", pady=5)
+
+        format_container = ttk.Frame(format_frame)
+        format_container.pack(fill="x", padx=10, pady=5)
+
+        ttk.Radiobutton(
+            format_container,
+            text="📺 16:9 Horizontal (1920x1080 Full HD)",
+            variable=self.video_format,
+            value="16:9"
+        ).pack(anchor="w", padx=5, pady=2)
+
+        ttk.Radiobutton(
+            format_container,
+            text="📱 9:16 Vertical (1080x1920 Full HD)",
+            variable=self.video_format,
+            value="9:16"
+        ).pack(anchor="w", padx=5, pady=2)
+
+        format_note = ttk.Label(
+            format_container,
+            text="💡 16:9 = YouTube/TV | 9:16 = TikTok/Instagram Stories/Reels",
+            foreground="#666666",
+            font=("TkDefaultFont", 8)
+        )
+        format_note.pack(anchor="w", padx=5, pady=2)
+
+        # 7. Opções Específicas do Modo
+        self.options_frame = ttk.LabelFrame(main_frame, text="7. Opções do Modo")
         self.options_frame.pack(fill="x", pady=5)
 
         # --- Campos para Imagens ---
         self.image_options_frame = ttk.Frame(self.options_frame)
-        ttk.Label(self.image_options_frame, text="Tempo por imagem (segundos):").pack(side="left", padx=5)
-        self.image_duration_entry = ttk.Entry(self.image_options_frame, textvariable=self.image_duration, width=5)
+
+        image_duration_container = ttk.Frame(self.image_options_frame)
+        image_duration_container.pack(fill="x", pady=2)
+        ttk.Label(image_duration_container, text="Tempo por imagem (segundos):").pack(side="left", padx=5)
+        self.image_duration_entry = ttk.Entry(image_duration_container, textvariable=self.image_duration, width=5)
         self.image_duration_entry.pack(side="left")
+
+        # Aviso sobre processamento
+        image_warning_container = ttk.Frame(self.image_options_frame)
+        image_warning_container.pack(fill="x", pady=5)
+        warning_label = ttk.Label(
+            image_warning_container,
+            text="💡 Dica: Desative Ken Burns e Fade para processamento mais rápido",
+            foreground="#666666",
+            font=("TkDefaultFont", 8)
+        )
+        warning_label.pack(anchor="w", padx=5)
 
         # --- Campos para Vídeos ---
         self.video_options_frame = ttk.Frame(self.options_frame)
@@ -587,8 +678,8 @@ class VideoCreatorApp(tk.Tk):
         )
         self.concat_warning_label.pack(anchor="w", padx=20)
 
-        # 7. Qualidade e Velocidade
-        quality_frame = ttk.LabelFrame(main_frame, text="7. Qualidade e Velocidade")
+        # 8. Qualidade e Velocidade
+        quality_frame = ttk.LabelFrame(main_frame, text="8. Qualidade e Velocidade")
         quality_frame.pack(fill="x", pady=5)
 
         # CRF
@@ -610,8 +701,8 @@ class VideoCreatorApp(tk.Tk):
                                     state="readonly", width=15)
         preset_combo.pack(side="left")
 
-        # 8. Duração do Fade
-        fade_frame = ttk.LabelFrame(main_frame, text="8. Efeito de Transição")
+        # 9. Duração do Fade
+        fade_frame = ttk.LabelFrame(main_frame, text="9. Efeito de Transição")
         fade_frame.pack(fill="x", pady=5)
 
         # Toggle para ativar/desativar fade
@@ -633,8 +724,8 @@ class VideoCreatorApp(tk.Tk):
                                      orient="horizontal", command=self.update_fade_label)
         self.fade_slider.pack(fill="x")
 
-        # 9. Opções Gerais
-        general_options_frame = ttk.LabelFrame(main_frame, text="9. Opções Gerais")
+        # 10. Opções Gerais
+        general_options_frame = ttk.LabelFrame(main_frame, text="10. Opções Gerais")
         general_options_frame.pack(fill="x", pady=5, ipady=5)
 
         self.ken_burns_check = ttk.Checkbutton(general_options_frame, text="Habilitar efeito Ken Burns (movimento)",
@@ -645,7 +736,7 @@ class VideoCreatorApp(tk.Tk):
                                                 variable=self.sequential)
         self.sequential_check.pack(anchor="w", padx=10)
 
-        # 10. Ação
+        # 11. Ação
         action_frame = ttk.Frame(main_frame)
         action_frame.pack(fill="x", pady=15)
 
@@ -658,7 +749,7 @@ class VideoCreatorApp(tk.Tk):
         self.status_label = ttk.Label(action_frame, text="Pronto para processar", foreground="blue")
         self.status_label.pack(pady=2)
 
-        # 11. Área de Logs
+        # 12. Área de Logs
         log_frame = ttk.LabelFrame(main_frame, text="Logs do Processo")
         log_frame.pack(fill="both", expand=True, pady=10)
 
@@ -740,7 +831,7 @@ class VideoCreatorApp(tk.Tk):
             self.direct_concat_check.config(state="normal")
             if self.direct_concat.get():
                 self.concat_warning_label.config(
-                    text="✓ Melhor resultado com vídeos do mesmo formato/codec",
+                    text="✓ Melhor resultado com vídeos do mesmo formato/codec. Mantém resolução original!",
                     foreground="green"
                 )
             else:
@@ -867,8 +958,11 @@ class VideoCreatorApp(tk.Tk):
 
         # Obtém o tempo máximo
         max_duration = float(self.max_duration.get())
+        video_format = self.video_format.get()
+        width, height = get_resolution_from_format(video_format)
 
         self.log(f"Configurações:", "info")
+        self.log(f"  - Formato: {video_format} ({width}x{height})", "info")
         self.log(f"  - Duração máxima: {max_duration}s (0 = sem limite)", "info")
         self.log(f"  - CRF: {self.crf_value.get()}", "info")
         self.log(f"  - Preset: {self.preset_value.get()}", "info")
@@ -894,7 +988,8 @@ class VideoCreatorApp(tk.Tk):
 
                 # Gera nome de arquivo único
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                output_filename = f"video_{folder_name}_{video_num}_{timestamp}.mp4"
+                format_suffix = video_format.replace(":", "x")
+                output_filename = f"video_{folder_name}_{format_suffix}_{video_num}_{timestamp}.mp4"
                 output_path = str(Path(output_folder) / output_filename)
 
                 self.log(f"Arquivo de saída: {output_filename}", "info")
@@ -903,11 +998,17 @@ class VideoCreatorApp(tk.Tk):
                 if self.mode.get() == "images":
                     duration = float(self.image_duration.get())
                     self.log(f"Modo: Imagens (duração por imagem: {duration}s)", "info")
+
+                    # Aviso sobre tempo de processamento
+                    if self.ken_burns.get() or self.fade_enabled.get():
+                        self.log(f"⚠️ Ken Burns e/ou Fade ativados - processamento pode demorar", "warning")
+                        self.log(f"💡 Para processamento mais rápido, desative esses efeitos", "info")
+
                     create_video_from_images(
                         folder, output_path, duration,
                         self.ken_burns.get(), self.sequential.get(),
                         self.crf_value.get(), self.preset_value.get(),
-                        self.fade_enabled.get(), self.fade_duration.get(), max_duration,
+                        self.fade_enabled.get(), self.fade_duration.get(), max_duration, video_format,
                         self.update_progress, self.log
                     )
                 else:
@@ -920,7 +1021,7 @@ class VideoCreatorApp(tk.Tk):
                         self.log(f"⚡ Processamento rápido sem recodificação", "info")
                         create_video_from_videos_direct(
                             folder, output_path, count, self.sequential.get(),
-                            max_duration,
+                            max_duration, video_format,
                             self.update_progress, self.log
                         )
                     else:
@@ -929,7 +1030,7 @@ class VideoCreatorApp(tk.Tk):
                         create_video_from_videos(
                             folder, output_path, count, self.sequential.get(),
                             self.crf_value.get(), self.preset_value.get(),
-                            self.fade_enabled.get(), self.fade_duration.get(), max_duration, speed,
+                            self.fade_enabled.get(), self.fade_duration.get(), max_duration, speed, video_format,
                             self.update_progress, self.log
                         )
 
