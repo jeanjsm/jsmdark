@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtCore import Qt
-from ui_tabs import BasicTab, VideoTab, OverlayTab, SubtitleTab
+from ui_tabs import BasicTab, VideoTab, OverlayTab, SubtitleTab, RosaryTab
 
 WINDOW_TITLE = "Gerador de Vídeos Automatizado"
 WINDOW_MIN_WIDTH = 1200
@@ -64,11 +64,13 @@ class VideoGeneratorGUI(QMainWindow):
         self.video_tab = VideoTab()
         self.overlay_tab = OverlayTab()
         self.subtitle_tab = SubtitleTab()
+        self.rosary_tab = RosaryTab()
 
         self.tabs.addTab(self.basic_tab, "1. Básico")
         self.tabs.addTab(self.video_tab, "2. Vídeo e Efeitos")
         self.tabs.addTab(self.overlay_tab, "3. Overlays")
         self.tabs.addTab(self.subtitle_tab, "4. Legendas")
+        self.tabs.addTab(self.rosary_tab, "5. Rosário")
 
         scroll_area.setWidget(self.tabs)
         config_layout.addWidget(scroll_area)

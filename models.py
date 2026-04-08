@@ -152,6 +152,9 @@ class ConfigModel:
     opening_video_paths: List[str] = field(default_factory=list)
     ending_video_path: str = ""
 
+    #Rosário - Mapa de imagens para cada slot
+    rosary_image_map: Dict[str, str] = field(default_factory=dict)
+
     def to_dict(self):
         # Converte o dataclass para um dicionário, incluindo os aninhados
         data = asdict(self)

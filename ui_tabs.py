@@ -1,6 +1,11 @@
 # ui_tabs.py
+from __future__ import annotations
 from typing import Optional, Tuple
 import logging
+import subprocess
+import tempfile
+import os
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget,
@@ -16,8 +21,18 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QFileDialog,
     QListWidget,
+    QTextEdit,
+    QLabel,
+    QProgressBar,
+    QScrollArea,
+    QMessageBox,
 )
-from PySide6.QtCore import Signal, QObject
+from PySide6.QtCore import Signal, QObject, Qt
+from PySide6.QtGui import QColor
+
+from rosary_config import build_rosary_slot_groups, load_rosary_config, save_rosary_config
+from rosary_template import build_rosary_timeline, parse_srt_file, RosaryTemplateError
+from ffmpeg_utils import get_ffmpeg_path
 
 # Named constants for magic numbers
 MIN_WIDTH = 320
@@ -672,3 +687,334 @@ class SubtitleTab(QWidget):
         self.subtitle_shadow_x.blockSignals(True)
         self.subtitle_shadow_y.blockSignals(True)
         self.subtitle_effect.blockSignals(True)
+
+
+# ==================== ROSARY TAB ====================
+# Converted from rosary_background_creator.py (Tkinter) to PySide6
+# Uses complete rosary structure from rosary_config.py (27 slots for a full rosary)
+
+def get_resolution_from_format(video_format: str) -> tuple[int, int]:
+    if video_format == "9:16":
+        return 1080, 1920
+    return 1920, 1080
+
+
+class RosaryTab(QWidget):
+    """Tab for generating rosary background videos."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.worker_thread = None
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        # Scroll area para conteúdo
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        container = QWidget()
+        main_layout = QVBoxLayout(container)
+
+        # Título
+        title_label = QLabel("Gerador de Background para Rosário")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        main_layout.addWidget(title_label)
+
+        # Arquivos de entrada
+        self.srt_path = FileBrowseWidget(
+            "Arquivo SRT com as orações", "file", "Legendas SRT (*.srt)"
+        )
+        self.audio_path = FileBrowseWidget(
+            "Áudio da narração (opcional)", "file", "Áudios (*.mp3 *.wav *.m4a *.aac *.flac)"
+        )
+        self.output_folder = FileBrowseWidget("Pasta de saída", "folder")
+
+        main_layout.addWidget(QLabel("Arquivo SRT:"))
+        main_layout.addWidget(self.srt_path)
+        main_layout.addWidget(QLabel("Áudio (opcional):"))
+        main_layout.addWidget(self.audio_path)
+        main_layout.addWidget(QLabel("Pasta de saída:"))
+        main_layout.addWidget(self.output_folder)
+
+        # Formato
+        format_group = QGroupBox("Formato do Vídeo")
+        format_layout = QVBoxLayout(format_group)
+        self.video_format = QComboBox()
+        self.video_format.addItems(["16:9 Horizontal", "9:16 Vertical"])
+        format_layout.addWidget(QLabel("Aspect Ratio:"))
+        format_layout.addWidget(self.video_format)
+        main_layout.addWidget(format_group)
+
+        # Qualidade
+        quality_group = QGroupBox("Qualidade de Codificação")
+        quality_layout = QFormLayout(quality_group)
+        self.crf_value = QSpinBox()
+        self.crf_value.setRange(18, 35)
+        self.crf_value.setValue(27)
+        self.preset_value = QComboBox()
+        self.preset_value.addItems(
+            ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow"]
+        )
+        self.preset_value.setCurrentText("fast")
+        self.fade_enabled = QCheckBox("Aplicar fade entre blocos")
+        self.fade_enabled.setChecked(True)
+        self.fade_duration = QDoubleSpinBox()
+        self.fade_duration.setRange(0.1, 2.0)
+        self.fade_duration.setValue(0.3)
+        self.fade_duration.setSuffix(" s")
+
+        quality_layout.addRow("CRF (qualidade):", self.crf_value)
+        quality_layout.addRow("Preset:", self.preset_value)
+        quality_layout.addRow(self.fade_enabled)
+        quality_layout.addRow("Duração do fade:", self.fade_duration)
+        main_layout.addWidget(quality_group)
+
+        # Exportação
+        export_group = QGroupBox("Exportação")
+        export_layout = QVBoxLayout(export_group)
+        self.export_with_audio = QCheckBox("Gerar versão final com áudio muxado")
+        self.export_with_audio.setChecked(True)
+        export_layout.addWidget(self.export_with_audio)
+        main_layout.addWidget(export_group)
+
+        # Imagens do rosário - estrutura completa
+        images_group = QGroupBox("Imagens do Rosário (27 slots para completo)")
+        images_layout = QVBoxLayout(images_group)
+
+        # Obter estrutura completa de slots
+        slot_groups = build_rosary_slot_groups()
+        self.image_vars: dict[str, QLineEdit] = {}
+
+        for group in slot_groups:
+            # Adicionar label do grupo (ex: "Orações Iniciais", "1ª dezena")
+            group_label = QLabel(group["label"])
+            group_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+            images_layout.addWidget(group_label)
+
+            # Adicionar slots deste grupo
+            for slot in group["slots"]:
+                slot_key = slot["key"]
+                slot_label = slot["label"]
+                optional = slot.get("optional", False)
+
+                row = QHBoxLayout()
+                lbl = QLabel(f"{slot_label}:" if not optional else f"{slot_label} (opcional):")
+                lbl.setFixedWidth(200)
+                row.addWidget(lbl)
+                entry = QLineEdit()
+                entry.setReadOnly(True)
+                entry.setPlaceholderText("Selecione uma imagem..." if not optional else "Opcional")
+                row.addWidget(entry)
+                btn = QPushButton("Selecionar")
+                btn.clicked.connect(lambda _, k=slot_key: self.browse_image_file(k))
+                row.addWidget(btn)
+                images_layout.addLayout(row)
+                self.image_vars[slot_key] = entry
+
+        main_layout.addWidget(images_group)
+
+        # Botões de ação
+        action_frame = QWidget()
+        action_layout = QVBoxLayout(action_frame)
+        self.generate_button = QPushButton("Gerar Vídeo do Rosário")
+        self.generate_button.clicked.connect(self.start_creation)
+        action_layout.addWidget(self.generate_button)
+
+        # Barra de progresso
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        action_layout.addWidget(self.progress_bar)
+
+        # Status
+        self.status_label = QLabel("Pronto para processar")
+        action_layout.addWidget(self.status_label)
+
+        main_layout.addWidget(action_frame)
+
+        # Log
+        log_group = QGroupBox("Logs")
+        log_layout = QVBoxLayout(log_group)
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setStyleSheet("background-color: #1e1e1e; color: #ffffff; font-family: Consolas;")
+        log_layout.addWidget(self.log_text)
+        main_layout.addWidget(log_group)
+
+        scroll.setWidget(container)
+        layout.addWidget(scroll)
+
+    def browse_image_file(self, slot_key: str) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Selecionar Imagem", "", "Imagens (*.png *.jpg *.jpeg *.bmp *.webp);;Todos (*.*)"
+        )
+        if path:
+            self.image_vars[slot_key].setText(path)
+
+    def log(self, message: str, level: str = "info") -> None:
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        colors = {
+            "info": "#00d4ff",
+            "success": "#00ff00",
+            "warning": "#ffaa00",
+            "error": "#ff5555",
+        }
+        color = colors.get(level, "#ffffff")
+        self.log_text.append(f'<span style="color:{color}">[{timestamp}] {message}</span>')
+        self.log_text.ensureCursorVisible()
+
+    def update_progress(self, value: int) -> None:
+        self.progress_bar.setValue(value)
+
+    def update_status(self, text: str) -> None:
+        self.status_label.setText(text)
+
+    def validate_inputs(self) -> None:
+        if not self.srt_path.text():
+            raise ValueError("Selecione o arquivo SRT.")
+        if not self.output_folder.text():
+            raise ValueError("Selecione a pasta de saída.")
+        if self.export_with_audio.isChecked() and not self.audio_path.text():
+            raise ValueError("Selecione o áudio ou desative a exportação com áudio.")
+
+    def collect_image_map(self) -> dict[str, str]:
+        image_map = {key: var.text() for key, var in self.image_vars.items() if var.text()}
+
+        # Coletar todos os slots obrigatórios (não opcionais) da estrutura
+        slot_groups = build_rosary_slot_groups()
+        required = set()
+        for group in slot_groups:
+            for slot in group["slots"]:
+                if not slot.get("optional", False):
+                    required.add(slot["key"])
+
+        missing = sorted(slot for slot in required if slot not in image_map)
+        if missing:
+            # Formatar a lista de missing de forma mais legível
+            missing_formatted = []
+            for slot_key in missing:
+                # Encontrar o label do slot
+                for group in slot_groups:
+                    for slot in group["slots"]:
+                        if slot["key"] == slot_key:
+                            missing_formatted.append(f"{slot['label']} ({slot_key})")
+                            break
+            raise ValueError(f"Imagens obrigatórias ausentes:\n" + "\n".join(f"  • {label}" for label in missing_formatted))
+        return image_map
+
+    def set_image_map(self, image_map: dict[str, str]) -> None:
+        """Define os caminhos das imagens a partir de um dicionário (carregar do config)."""
+        for key, path in image_map.items():
+            if key in self.image_vars:
+                self.image_vars[key].setText(path)
+
+    def get_image_map_dict(self) -> dict[str, str]:
+        """Retorna dicionário com todas as imagens preenchidas (sem validação)."""
+        return {key: var.text() for key, var in self.image_vars.items() if var.text()}
+
+    def start_creation(self) -> None:
+        self.log_text.clear()
+        self.update_progress(0)
+        try:
+            self.validate_inputs()
+            image_map = self.collect_image_map()
+            entries = parse_srt_file(self.srt_path.text())
+            timeline = build_rosary_timeline(entries)
+            output_folder = Path(self.output_folder.text())
+            output_folder.mkdir(parents=True, exist_ok=True)
+            stem = Path(self.srt_path.text()).stem
+            background_path = output_folder / f"{stem}_background.mp4"
+            final_path = output_folder / f"{stem}_final.mp4"
+            self.render_background_video(timeline, image_map, background_path)
+            if self.export_with_audio.isChecked():
+                self.mux_audio(background_path, Path(self.audio_path.text()), final_path)
+                self.log(f"Vídeo final com áudio criado: {final_path.name}", "success")
+            self.update_progress(100)
+            self.update_status("Processo concluído")
+            self.log(f"Background criado: {background_path.name}", "success")
+            QMessageBox.information(self, "Sucesso", f"Arquivos gerados em:\n{output_folder}")
+        except (ValueError, RosaryTemplateError) as exc:
+            self.update_status("Falha na validação")
+            self.log(str(exc), "error")
+            QMessageBox.critical(self, "Erro", str(exc))
+        except Exception as exc:
+            self.update_status("Erro no processamento")
+            self.log(str(exc), "error")
+            QMessageBox.critical(self, "Erro", str(exc))
+
+    def render_background_video(self, timeline, image_map: dict[str, str], output_path: Path) -> None:
+        ffmpeg_path = get_ffmpeg_path()
+        width, height = get_resolution_from_format(self.video_format.currentText().split()[0])
+        temp_dir = Path(tempfile.mkdtemp(prefix="rosary_bg_"))
+        concat_path = temp_dir / "concat.txt"
+        temp_files: list[Path] = []
+        try:
+            with concat_path.open("w", encoding="utf-8") as concat_file:
+                for index, item in enumerate(timeline):
+                    image_path = image_map.get(item.slot_key)
+                    if not image_path:
+                        raise ValueError(f"Nenhuma imagem configurada para o slot '{item.slot_key}'. Preencha todas as imagens obrigatórias.")
+                    clip_path = temp_dir / f"clip_{index:03d}.mp4"
+                    temp_files.append(clip_path)
+                    duration = max(0.1, item.end - item.start)
+                    vf = [
+                        f"scale={width}:{height}:force_original_aspect_ratio=decrease",
+                        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+                    ]
+                    if self.fade_enabled.isChecked() and duration > (self.fade_duration.value() * 2):
+                        fade = self.fade_duration.value()
+                        vf.append(f"fade=t=in:st=0:d={fade}")
+                        vf.append(f"fade=t=out:st={duration - fade}:d={fade}")
+                    vf.append("format=yuv420p")
+                    cmd = [
+                        ffmpeg_path,
+                        "-y",
+                        "-loop", "1",
+                        "-t", str(duration),
+                        "-i", str(image_path),
+                        "-vf", ",".join(vf),
+                        "-c:v", "libx264",
+                        "-preset", self.preset_value.currentText(),
+                        "-crf", str(self.crf_value.value()),
+                        "-r", "30",
+                        "-an", str(clip_path),
+                    ]
+                    subprocess.run(cmd, check=True, capture_output=True, text=True)
+                    concat_file.write(f"file '{clip_path.resolve()}'\n")
+                    self.update_progress(int(((index + 1) / max(1, len(timeline))) * 90))
+                    self.log(f"Clip {index + 1}/{len(timeline)} criado para {item.slot_key}")
+            subprocess.run([
+                ffmpeg_path,
+                "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(concat_path),
+                "-c", "copy",
+                str(output_path),
+            ], check=True, capture_output=True, text=True)
+        finally:
+            for temp_file in temp_files:
+                if temp_file.exists():
+                    temp_file.unlink()
+            if concat_path.exists():
+                concat_path.unlink()
+            if temp_dir.exists():
+                os.rmdir(temp_dir)
+
+    def mux_audio(self, video_path: Path, audio_path: Path, output_path: Path) -> None:
+        subprocess.run([
+            get_ffmpeg_path(),
+            "-y",
+            "-i", str(video_path),
+            "-i", str(audio_path),
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-shortest",
+            str(output_path),
+        ], check=True, capture_output=True, text=True)
+
+
+# ====================================================

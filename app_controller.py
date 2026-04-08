@@ -217,6 +217,12 @@ class AppController(QObject):
                     self.view.subtitle_tab.camera_shake_duration.value()
                 )
                 continue
+            # Campo especial: rosary_image_map (da RosaryTab)
+            if field_name == "rosary_image_map":
+                if hasattr(self.view, 'rosary_tab'):
+                    # Para salvar configuração, pegamos todas as imagens preenchidas (sem validação)
+                    self.model.rosary_image_map = self.view.rosary_tab.get_image_map_dict()
+                continue
             widget = self._find_widget_for_field(field_name)
             if not widget:
                 continue
@@ -248,6 +254,11 @@ class AppController(QObject):
                 self.view.subtitle_tab.camera_shake_intensity.setValue(config.intensity)
                 self.view.subtitle_tab.camera_shake_frequency.setValue(config.frequency)
                 self.view.subtitle_tab.camera_shake_duration.setValue(config.duration)
+                continue
+            # Campo especial: rosary_image_map (da RosaryTab)
+            if field_name == "rosary_image_map":
+                if hasattr(self.view, 'rosary_tab'):
+                    self.view.rosary_tab.set_image_map(self.model.rosary_image_map)
                 continue
             widget = self._find_widget_for_field(field_name)
             if not widget:
