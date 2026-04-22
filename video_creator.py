@@ -40,7 +40,8 @@ def get_resolution_from_format(video_format):
 
 def create_video_from_images(
         image_folder, output_path, duration_per_image, use_ken_burns, sequential,
-        crf, preset, fade_enabled, fade_duration, max_duration, video_format, progress_callback, log_callback
+    crf, preset, fade_enabled, fade_duration, max_duration, video_format, ken_burns_speed,
+    progress_callback, log_callback
 ):
     """Cria um vídeo a partir de uma pasta de imagens."""
     log_callback(f"Iniciando criação de vídeo a partir de imagens...", "info")
@@ -103,15 +104,18 @@ def create_video_from_images(
 
             # Filtro de vídeo com fade
             if use_ken_burns:
+                movement_speed = max(0.1, float(ken_burns_speed))
+                movement_duration = max(0.1, duration_per_image / movement_speed)
+
                 zoom = 1.2
                 scaled_w = int(width * zoom)
                 scaled_h = int(height * zoom)
 
                 effects = [
-                    {'x': f'(iw-ow)*(t/{duration_per_image})', 'y': '(ih-oh)/2'},
-                    {'x': f'(iw-ow)*(1-(t/{duration_per_image}))', 'y': '(ih-oh)/2'},
-                    {'x': '(iw-ow)/2', 'y': f'(ih-oh)*(t/{duration_per_image})'},
-                    {'x': '(iw-ow)/2', 'y': f'(ih-oh)*(1-(t/{duration_per_image}))'},
+                    {'x': f'(iw-ow)*(t/{movement_duration})', 'y': '(ih-oh)/2'},
+                    {'x': f'(iw-ow)*(1-(t/{movement_duration}))', 'y': '(ih-oh)/2'},
+                    {'x': '(iw-ow)/2', 'y': f'(ih-oh)*(t/{movement_duration})'},
+                    {'x': '(iw-ow)/2', 'y': f'(ih-oh)*(1-(t/{movement_duration}))'},
                 ]
                 effect = random.choice(effects)
                 pan_x, pan_y = effect['x'], effect['y']
@@ -123,9 +127,10 @@ def create_video_from_images(
             else:
                 vf = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
 
-            # Adiciona fade in/out
-            if fade_duration > 0:
-                vf += f"fade=t=in:st=0:d={fade_duration},fade=t=out:st={duration_per_image - fade_duration}:d={fade_duration},"
+            # Adiciona fade in/out apenas se ativado
+            if fade_enabled and fade_duration > 0:
+                fade_out_start = max(0, duration_per_image - fade_duration)
+                vf += f"fade=t=in:st=0:d={fade_duration},fade=t=out:st={fade_out_start}:d={fade_duration},"
 
             vf += "format=yuv420p"
 
@@ -526,6 +531,7 @@ class VideoCreatorApp(tk.Tk):
         self.preset_value = tk.StringVar(value="fast")
         self.fade_enabled = tk.BooleanVar(value=True)
         self.fade_duration = tk.DoubleVar(value=0.5)
+        self.ken_burns_speed = tk.DoubleVar(value=1.0)
         self.video_format = tk.StringVar(value="16:9")
 
         # Estilo
@@ -535,9 +541,27 @@ class VideoCreatorApp(tk.Tk):
         style.configure("TRadiobutton", background="#f0f0f0")
         style.configure("TCheckbutton", background="#f0f0f0")
 
-        # Frame principal
-        main_frame = ttk.Frame(self, padding="20")
-        main_frame.pack(fill="both", expand=True)
+        # Container principal com scroll vertical
+        scroll_container = ttk.Frame(self)
+        scroll_container.pack(fill="both", expand=True)
+
+        self.main_canvas = tk.Canvas(scroll_container, highlightthickness=0, background="#f0f0f0")
+        self.main_canvas.pack(side="left", fill="both", expand=True)
+
+        self.main_scrollbar = ttk.Scrollbar(scroll_container, orient="vertical", command=self.main_canvas.yview)
+        self.main_scrollbar.pack(side="right", fill="y")
+
+        self.main_canvas.configure(yscrollcommand=self.main_scrollbar.set)
+
+        # Frame de conteúdo dentro do canvas
+        main_frame = ttk.Frame(self.main_canvas, padding="20")
+        self.main_canvas_window = self.main_canvas.create_window((0, 0), window=main_frame, anchor="nw")
+
+        self.main_canvas.bind("<Configure>", self._on_canvas_configure)
+        main_frame.bind("<Configure>", self._on_main_frame_configure)
+
+        # Scroll com roda do mouse (Windows)
+        self.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
 
         # 1. Seleção de Modo
         mode_frame = ttk.LabelFrame(main_frame, text="1. Escolha o Modo")
@@ -729,8 +753,31 @@ class VideoCreatorApp(tk.Tk):
         general_options_frame.pack(fill="x", pady=5, ipady=5)
 
         self.ken_burns_check = ttk.Checkbutton(general_options_frame, text="Habilitar efeito Ken Burns (movimento)",
-                                               variable=self.ken_burns)
+                                               variable=self.ken_burns, command=self.update_ken_burns_ui)
         self.ken_burns_check.pack(anchor="w", padx=10)
+
+        ken_burns_speed_container = ttk.Frame(general_options_frame)
+        ken_burns_speed_container.pack(fill="x", padx=10, pady=(2, 6))
+        self.ken_burns_speed_label = ttk.Label(
+            ken_burns_speed_container,
+            text="Velocidade do Ken Burns: 1.0x"
+        )
+        self.ken_burns_speed_label.pack(anchor="w")
+        self.ken_burns_speed_slider = ttk.Scale(
+            ken_burns_speed_container,
+            from_=0.2,
+            to=2.0,
+            variable=self.ken_burns_speed,
+            orient="horizontal",
+            command=self.update_ken_burns_speed_label
+        )
+        self.ken_burns_speed_slider.pack(fill="x")
+        ttk.Label(
+            ken_burns_speed_container,
+            text="(0.2x=mais lento, 1.0x=normal, 2.0x=mais rápido)",
+            foreground="#666666",
+            font=("TkDefaultFont", 8)
+        ).pack(anchor="w")
 
         self.sequential_check = ttk.Checkbutton(general_options_frame, text="Usar ordem sequencial (por nome)",
                                                 variable=self.sequential)
@@ -779,8 +826,45 @@ class VideoCreatorApp(tk.Tk):
         # Inicializa a UI
         self.update_ui()
         self.update_fade_ui()
+        self.update_ken_burns_ui()
         self.update_concat_warning()
         self.log("Sistema iniciado. Aguardando entrada...", "info")
+
+    def _on_main_frame_configure(self, _event):
+        """Atualiza a região de rolagem quando o conteúdo muda."""
+        self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event):
+        """Mantém o frame interno com a mesma largura do canvas."""
+        self.main_canvas.itemconfig(self.main_canvas_window, width=event.width)
+
+    def _is_child_of(self, widget, parent):
+        """Verifica se widget é filho (direto/indireto) de parent."""
+        current = widget
+        while current is not None:
+            if current == parent:
+                return True
+            try:
+                parent_name = current.winfo_parent()
+                if not parent_name:
+                    return False
+                current = current.nametowidget(parent_name)
+            except Exception:
+                return False
+        return False
+
+    def _on_mousewheel(self, event):
+        """Rola a interface principal com a roda do mouse (Windows)."""
+        target_widget = self.winfo_containing(event.x_root, event.y_root)
+        if target_widget is None:
+            return
+
+        # Evita conflito com a área de logs (que já possui rolagem própria)
+        if hasattr(self, "log_text") and self._is_child_of(target_widget, self.log_text):
+            return
+
+        if event.delta:
+            self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def clear_logs(self):
         """Limpa a área de logs."""
@@ -856,6 +940,20 @@ class VideoCreatorApp(tk.Tk):
         fade = float(value)
         self.fade_label.config(text=f"Duração do Fade Padrão (Segundos): {fade:.1f}s")
 
+    def update_ken_burns_speed_label(self, value):
+        """Atualiza o label da velocidade do Ken Burns."""
+        speed = float(value)
+        self.ken_burns_speed_label.config(text=f"Velocidade do Ken Burns: {speed:.1f}x")
+
+    def update_ken_burns_ui(self):
+        """Atualiza a UI do controle de velocidade do Ken Burns."""
+        if self.ken_burns.get():
+            self.ken_burns_speed_slider.config(state="normal")
+            self.ken_burns_speed_label.config(foreground="black")
+        else:
+            self.ken_burns_speed_slider.config(state="disabled")
+            self.ken_burns_speed_label.config(foreground="gray")
+
     def update_ui(self):
         """Atualiza a interface com base no modo selecionado."""
         mode = self.mode.get()
@@ -924,6 +1022,11 @@ class VideoCreatorApp(tk.Tk):
             if num_videos < 1:
                 raise ValueError("O número de vídeos deve ser maior que 0")
 
+            if self.mode.get() == "images":
+                ken_burns_speed = float(self.ken_burns_speed.get())
+                if ken_burns_speed <= 0:
+                    raise ValueError("A velocidade do Ken Burns deve ser maior que 0")
+
             # Valida velocidade se for modo vídeos
             if self.mode.get() == "videos":
                 speed = float(self.video_speed.get())
@@ -969,6 +1072,7 @@ class VideoCreatorApp(tk.Tk):
         self.log(f"  - Fade: {'Ativado' if self.fade_enabled.get() else 'Desativado'} ({self.fade_duration.get()}s)",
                  "info")
         self.log(f"  - Ken Burns: {'Sim' if self.ken_burns.get() else 'Não'}", "info")
+        self.log(f"  - Velocidade Ken Burns: {self.ken_burns_speed.get():.1f}x", "info")
         self.log(f"  - Sequencial: {'Sim' if self.sequential.get() else 'Não'}", "info")
 
         if self.mode.get() == "videos":
@@ -1009,6 +1113,7 @@ class VideoCreatorApp(tk.Tk):
                         self.ken_burns.get(), self.sequential.get(),
                         self.crf_value.get(), self.preset_value.get(),
                         self.fade_enabled.get(), self.fade_duration.get(), max_duration, video_format,
+                        self.ken_burns_speed.get(),
                         self.update_progress, self.log
                     )
                 else:

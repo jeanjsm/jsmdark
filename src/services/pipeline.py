@@ -7,7 +7,7 @@ import hashlib
 import time
 import tempfile
 import os
-import glob
+import shutil
 
 # Local (relative) imports
 from .audio_utils import duration_seconds
@@ -1059,13 +1059,15 @@ class OutputStage(PipelineStage):
                 print(f"Arquivo de filtro removido: {filter_file}")
             if ctx.get("subtitle_file") and os.path.exists(ctx["subtitle_file"]):
                 os.unlink(ctx["subtitle_file"])
+
+            # Remove completamente o diretório cache
             cache_dir = Path(out_path).parent / "cache"
             if cache_dir.exists():
-                for cmd_file in glob.glob(str(cache_dir / "cmd_*.txt")):
-                    try:
-                        os.unlink(cmd_file)
-                    except OSError:
-                        pass
+                try:
+                    shutil.rmtree(cache_dir)
+                    print(f"Cache removido: {cache_dir}")
+                except Exception as e:
+                    print(f"Aviso: Não foi possível remover o cache: {e}")
 
         total_time = time.time() - start_time
         print(f"Renderização final concluída em {total_time:.1f}s")

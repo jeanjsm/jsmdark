@@ -223,6 +223,12 @@ class AppController(QObject):
                     # Para salvar configuração, pegamos todas as imagens preenchidas (sem validação)
                     self.model.rosary_image_map = self.view.rosary_tab.get_image_map_dict()
                 continue
+            if field_name == "rosary_has_initial_prayers":
+                if hasattr(self.view, 'rosary_tab'):
+                    self.model.rosary_has_initial_prayers = (
+                        self.view.rosary_tab.has_initial_prayers.isChecked()
+                    )
+                continue
             widget = self._find_widget_for_field(field_name)
             if not widget:
                 continue
@@ -259,6 +265,12 @@ class AppController(QObject):
             if field_name == "rosary_image_map":
                 if hasattr(self.view, 'rosary_tab'):
                     self.view.rosary_tab.set_image_map(self.model.rosary_image_map)
+                continue
+            if field_name == "rosary_has_initial_prayers":
+                if hasattr(self.view, 'rosary_tab'):
+                    self.view.rosary_tab.has_initial_prayers.setChecked(
+                        self.model.rosary_has_initial_prayers
+                    )
                 continue
             widget = self._find_widget_for_field(field_name)
             if not widget:

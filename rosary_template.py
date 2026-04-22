@@ -89,17 +89,30 @@ def parse_srt_file(srt_path: str | Path) -> list[tuple[float, float, str]]:
     ]
 
 
-def build_rosary_timeline(entries: list[tuple[float, float, str]]) -> list[RosaryTimelineItem]:
+def build_rosary_timeline(
+    entries: list[tuple[float, float, str]],
+    has_initial_prayers: bool = True,
+) -> list[RosaryTimelineItem]:
     """
     Constrói a timeline do rosário mapeando as entradas do SRT para os slots da estrutura completa.
 
-    Estrutura:
+    Estrutura (quando has_initial_prayers=True):
     - Orações Iniciais (6 slots):
         initial_creed, initial_pai_nosso, initial_ave_maria_1/2/3, initial_gloria
     - Dezenas 1-5 (cada uma com 13-14 slots):
         decade_X_pai_nosso, decade_X_ave_maria_1..10, decade_X_gloria, decade_X_final_prayer (opcional)
     - Encerramento (1 slot):
         closing
+
+    Quando has_initial_prayers=False, o parser ignora a fase inicial e começa
+    diretamente na primeira dezena (o primeiro Pai-Nosso encontrado abre a dezena 1).
+
+    Args:
+        entries: Lista de (start, end, text) obtida do SRT.
+        has_initial_prayers: Indica se o roteiro contém as orações iniciais
+            (Credo, Pai-Nosso inicial, 3 Ave-Marias iniciais, Glória inicial).
+            Quando False, qualquer texto de credo é tratado como narrativa e
+            o primeiro Pai-Nosso inicia a 1ª dezena diretamente.
 
     O SRT deve conter as orações na sequência correta.
     """
@@ -114,10 +127,17 @@ def build_rosary_timeline(entries: list[tuple[float, float, str]]) -> list[Rosar
     current_end: float | None = None
     current_text_parts: list[str] = []
 
+    # Buffer para textos iniciais não reconhecidos antes do primeiro slot.
+    # Isso preserva a duração total do SRT (evita perder minutos iniciais).
+    leading_start: float | None = None
+    leading_text_parts: list[str] = []
+
     # Contadores
     decade_number = 0  # 0 = orações iniciais, 1-5 = dezenas
     ave_maria_index = 0  # Índice da Ave-Maria na sequência atual
-    phase = "initials"  # "initials", "decade", "closing"
+    # Quando não há orações iniciais, iniciar diretamente após a glória inicial
+    # para que o primeiro Pai-Nosso abra a dezena 1
+    phase = "initials" if has_initial_prayers else "after_initial_glory"  # "initials", "decade", "closing"
 
     def flush_current() -> None:
         nonlocal current_slot, current_start, current_end, current_text_parts
@@ -135,12 +155,20 @@ def build_rosary_timeline(entries: list[tuple[float, float, str]]) -> list[Rosar
 
     def ensure_slot(slot_key: str, start: float, end: float, text: str) -> None:
         nonlocal current_slot, current_start, current_end, current_text_parts
+        nonlocal leading_start, leading_text_parts
         if current_slot != slot_key:
             flush_current()
             current_slot = slot_key
-            current_start = start
+            # Se houver texto inicial sem slot, anexar ao primeiro slot reconhecido
+            if leading_start is not None:
+                current_start = leading_start
+                current_text_parts = [*leading_text_parts, text]
+                leading_start = None
+                leading_text_parts = []
+            else:
+                current_start = start
+                current_text_parts = [text]
             current_end = end
-            current_text_parts = [text]
         else:
             current_end = end
             current_text_parts.append(text)
@@ -197,11 +225,20 @@ def build_rosary_timeline(entries: list[tuple[float, float, str]]) -> list[Rosar
             # "Em nome do Pai..." como invocação inicial (sem texto de credo)
             prayer_type = "creed"
 
+        # Quando não há orações iniciais, credo detectado é narrativa (e.g. "Meu Deus, eu creio...")
+        if not has_initial_prayers and prayer_type == "creed":
+            prayer_type = None
+
         if prayer_type is None:
             # Texto não reconhecido - anexar ao atual se houver
             if current_slot is not None:
                 current_end = end
                 current_text_parts.append(text)
+            else:
+                # Ainda não iniciamos nenhum slot: guardar como bloco inicial
+                if leading_start is None:
+                    leading_start = start
+                leading_text_parts.append(text)
             continue
 
         # Lógica de transição de estado

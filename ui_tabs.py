@@ -779,6 +779,21 @@ class RosaryTab(QWidget):
         export_layout.addWidget(self.export_with_audio)
         main_layout.addWidget(export_group)
 
+        # Estrutura do Roteiro
+        structure_group = QGroupBox("Estrutura do Roteiro")
+        structure_layout = QVBoxLayout(structure_group)
+        self.has_initial_prayers = QCheckBox(
+            "Contém orações iniciais (Credo, Pai-Nosso, 3 Ave-Marias, Glória)"
+        )
+        self.has_initial_prayers.setChecked(True)
+        self.has_initial_prayers.setToolTip(
+            "Desmarque quando o roteiro não possui as orações iniciais do terço\n"
+            "e vai direto para as dezenas."
+        )
+        self.has_initial_prayers.toggled.connect(self._on_initial_prayers_toggled)
+        structure_layout.addWidget(self.has_initial_prayers)
+        main_layout.addWidget(structure_group)
+
         # Imagens do rosário - estrutura completa
         images_group = QGroupBox("Imagens do Rosário (27 slots para completo)")
         images_layout = QVBoxLayout(images_group)
@@ -786,20 +801,34 @@ class RosaryTab(QWidget):
         # Obter estrutura completa de slots
         slot_groups = build_rosary_slot_groups()
         self.image_vars: dict[str, QLineEdit] = {}
+        self._initial_prayers_container: QWidget | None = None
 
         for group in slot_groups:
-            # Adicionar label do grupo (ex: "Orações Iniciais", "1ª dezena")
             group_label = QLabel(group["label"])
             group_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
-            images_layout.addWidget(group_label)
 
-            # Adicionar slots deste grupo
+            is_initial = group["key"] == "initial_prayers"
+            if is_initial:
+                # Envolver em um widget separado para permitir ocultar/mostrar via toggle
+                # Nota: a variável é intencionalmente diferente de `container` (o scroll container)
+                initial_group_widget = QWidget()
+                target_layout: QVBoxLayout = QVBoxLayout(initial_group_widget)
+                target_layout.setContentsMargins(0, 0, 0, 0)
+                target_layout.addWidget(group_label)
+                images_layout.addWidget(initial_group_widget)
+                self._initial_prayers_container = initial_group_widget
+            else:
+                images_layout.addWidget(group_label)
+                target_layout = images_layout  # type: ignore[assignment]
+
             for slot in group["slots"]:
                 slot_key = slot["key"]
                 slot_label = slot["label"]
                 optional = slot.get("optional", False)
 
-                row = QHBoxLayout()
+                row_widget = QWidget()
+                row = QHBoxLayout(row_widget)
+                row.setContentsMargins(0, 0, 0, 0)
                 lbl = QLabel(f"{slot_label}:" if not optional else f"{slot_label} (opcional):")
                 lbl.setFixedWidth(200)
                 row.addWidget(lbl)
@@ -810,7 +839,7 @@ class RosaryTab(QWidget):
                 btn = QPushButton("Selecionar")
                 btn.clicked.connect(lambda _, k=slot_key: self.browse_image_file(k))
                 row.addWidget(btn)
-                images_layout.addLayout(row)
+                target_layout.addWidget(row_widget)
                 self.image_vars[slot_key] = entry
 
         main_layout.addWidget(images_group)
@@ -853,6 +882,11 @@ class RosaryTab(QWidget):
         if path:
             self.image_vars[slot_key].setText(path)
 
+    def _on_initial_prayers_toggled(self, checked: bool) -> None:
+        """Mostra ou oculta os slots de imagem das orações iniciais."""
+        if self._initial_prayers_container is not None:
+            self._initial_prayers_container.setVisible(checked)
+
     def log(self, message: str, level: str = "info") -> None:
         from datetime import datetime
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -887,6 +921,9 @@ class RosaryTab(QWidget):
         slot_groups = build_rosary_slot_groups()
         required = set()
         for group in slot_groups:
+            # Ignorar orações iniciais se o toggle estiver desativado
+            if group["key"] == "initial_prayers" and not self.has_initial_prayers.isChecked():
+                continue
             for slot in group["slots"]:
                 if not slot.get("optional", False):
                     required.add(slot["key"])
@@ -922,7 +959,7 @@ class RosaryTab(QWidget):
             self.validate_inputs()
             image_map = self.collect_image_map()
             entries = parse_srt_file(self.srt_path.text())
-            timeline = build_rosary_timeline(entries)
+            timeline = build_rosary_timeline(entries, has_initial_prayers=self.has_initial_prayers.isChecked())
             output_folder = Path(self.output_folder.text())
             output_folder.mkdir(parents=True, exist_ok=True)
             stem = Path(self.srt_path.text()).stem
